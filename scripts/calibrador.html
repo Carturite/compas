@@ -8,7 +8,7 @@
   Herramienta local para preparar escenas (no es parte de la extensión).
   Se abre con: python scripts/escenas.py --calibrar
   Pisos: 4 esquinas sobre el fondo. Objetos: contorno de lo que tapa a los personajes.
-  Personajes: nombre y ancho (1 o 2 cuadritos) de cada recorte. "Guardar" escribe escena.json y regenera todo.
+  Personajes: nombre y ancho (1 a 3 cuadritos) de cada recorte. "Guardar" escribe escena.json y regenera todo.
 -->
 <style>
   :root { --bg: #16181b; --panel: #202327; --line: #33373d; --text: #e9e6df; --muted: #9a9890; --accent: #6fc2b4; --warn: #e3967c; }
@@ -272,18 +272,20 @@ function panel() {
         <button data-osel="${i}">Editar</button><button data-odel="${i}">✕</button></div>`; }).join('')}
       ${mode === 'nuevoObjeto' ? '<button id="finish-prop" class="primary">Terminar</button> <button id="cancel-new">Cancelar</button>' : '<button id="new-prop">+ Objeto nuevo</button>'}`;
   } else {
-    P.innerHTML = cuts.length ? `<p class="help">Marca "usar", ponle nombre y ancho (1 o 2 cuadritos). "Probar" lo muestra bajo el mouse sobre los pisos para ver su tamaño.</p>
+    P.innerHTML = cuts.length ? `<p class="help">Marca "usar", ponle nombre y ancho (1 a 3 cuadritos). "objeto" si es una cosa y no un personaje (para el sorteo de premios); "capa" si no ocupa lugar (alfombra, arco: detrás; macetero: delante). "Probar" lo muestra bajo el mouse sobre los pisos para ver su tamaño.</p>
       <div class="cuts">${cuts.map((c, k) => { const p = personajeOf(c.recorte); return `<div class="cut${p ? ' on' : ''}">
         <img src="/img/escenas/${sid}/_recortes/${c.archivo}" alt="">
         <span class="muted">${esc(c.recorte)}</span>
         <label><input type="checkbox" data-cuse="${k}" ${p ? 'checked' : ''}> usar</label>
         <input type="text" data-cid="${k}" value="${esc(p?.id ?? `${sid}-${k}`)}" placeholder="id">
         <input type="text" data-cname="${k}" value="${esc(p?.nombre ?? '')}" placeholder="nombre">
-        <span><select data-cw="${k}"><option value="1" ${p?.ancho !== 2 ? 'selected' : ''}>1 cuadrito</option><option value="2" ${p?.ancho === 2 ? 'selected' : ''}>2 cuadritos</option></select>
+        <span><select data-cw="${k}">${[1, 2, 3].map((n) => `<option value="${n}" ${(p?.ancho ?? 1) === n ? 'selected' : ''}>${n} cuadrito${n > 1 ? 's' : ''}</option>`).join('')}</select>
         <button data-ctry="${k}" aria-pressed="${trying === c}">Probar</button></span>
         <span><label title="Altura de su dibujo donde puede pararse otro (0 = arriba, 1 = pies). Vacío = nadie."><span class="muted">encima</span> <input type="number" data-ctop="${k}" step="0.01" min="0" max="1" value="${p?.encima ?? ''}" style="width:64px"></label>
         <label title="Cuelga de sus patitas en los puntos para colgar"><input type="checkbox" data-chang="${k}" ${p?.cuelga ? 'checked' : ''}> cuelga</label>
-        <label title="Si en la hoja lo dibujaron más grande o más chico que el resto"><span class="muted">escala</span> <input type="number" data-cscale="${k}" step="0.05" min="0.2" max="3" value="${p?.escala ?? 1}" style="width:64px"></label></span></div>`; }).join('')}</div>`
+        <label title="Si en la hoja lo dibujaron más grande o más chico que el resto"><span class="muted">escala</span> <input type="number" data-cscale="${k}" step="0.05" min="0.2" max="3" value="${p?.escala ?? 1}" style="width:64px"></label></span>
+        <span><label title="Una cosa, no un personaje: cuenta como objeto en el sorteo de premios"><input type="checkbox" data-cobj="${k}" ${p?.tipo === 'objeto' ? 'checked' : ''}> objeto</label>
+        <label title="No ocupa lugar: otros se ponen en sus celdas, y se dibuja detrás o delante de ellos"><span class="muted">capa</span> <select data-clayer="${k}">${[['', '—'], ['detras', 'detrás'], ['delante', 'delante']].map(([v, t]) => `<option value="${v}" ${(p?.capa ?? '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label></span></div>`; }).join('')}</div>`
       : '<p class="help">Guarda una vez para cortar las hojas de esta escena.</p>';
   }
 }
@@ -374,6 +376,9 @@ function setPersonaje(k) {
     if (card.querySelector('[data-chang]').checked) entry.cuelga = true;
     const scale = Number(card.querySelector('[data-cscale]').value);
     if (scale && scale !== 1) entry.escala = scale;
+    if (card.querySelector('[data-cobj]').checked) entry.tipo = 'objeto';
+    const layer = card.querySelector('[data-clayer]').value;
+    if (layer) entry.capa = layer;
     escena.personajes[id] = entry;
   }
   card.classList.toggle('on', use);
@@ -386,7 +391,7 @@ $('#panel').addEventListener('change', (e) => {
   else if (d.sheet !== undefined || d.celda !== undefined) {
     escena.hojas = folders.find((f) => f.id === sid).hojas
       .filter((a) => document.querySelector(`[data-sheet="${CSS.escape(a)}"]`).checked)
-      .map((a) => ({ archivo: a, celda: Number(document.querySelector(`[data-celda="${CSS.escape(a)}"]`).value) }));
+      .map((a) => ({ ...escena.hojas.find((h) => h.archivo === a), archivo: a, celda: Number(document.querySelector(`[data-celda="${CSS.escape(a)}"]`).value) }));
   }
   else if (d.pid !== undefined) escena.pisos[d.pid].id = t.value.trim();
   else if (d.pcols !== undefined) escena.pisos[d.pcols].cols = Math.max(1, Number(t.value));
@@ -398,7 +403,7 @@ $('#panel').addEventListener('change', (e) => {
   else if (d.oname !== undefined) renameProp(Number(d.oname), t.value.trim());
   else if (d.obase !== undefined) Object.values(escena.objetos)[d.obase].base = Number(t.value);
   else if (d.okey !== undefined) Object.values(escena.objetos)[d.okey].llave = t.checked;
-  else for (const k of ['cuse', 'cid', 'cname', 'cw', 'ctop', 'chang', 'cscale']) if (d[k] !== undefined) { setPersonaje(Number(d[k])); break; }
+  else for (const k of ['cuse', 'cid', 'cname', 'cw', 'ctop', 'chang', 'cscale', 'cobj', 'clayer']) if (d[k] !== undefined) { setPersonaje(Number(d[k])); break; }
   draw();
 });
 $('#panel').addEventListener('click', (e) => {

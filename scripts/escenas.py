@@ -45,16 +45,19 @@ def clean(im: Image.Image) -> Image.Image:
     return Image.merge("RGBA", (r, g, b, a))
 
 
-def components(im: Image.Image) -> list[tuple[tuple[int, int, int, int], Image.Image]]:
+def components(im: Image.Image, paper: bool = False) -> list[tuple[tuple[int, int, int, int], Image.Image]]:
     """Each separate drawing: its bounding box and a mask with only its own pixels,
-    found on a downscaled mask (so a neighbour's tail inside the box is left out)."""
+    found on a downscaled mask (so a neighbour's tail inside the box is left out).
+    Parchment sheets pack their drawings closer and have leaves on the frame: there the mask is finer, only
+    touching pixels join, bits on the sheet's edge are dropped and other small bits join the closest drawing."""
     w, h = im.size
-    small = im.getchannel("A").resize((w // SCALE, h // SCALE), Image.Resampling.BOX)
+    scale, reach, min_area = (2, 1, 12) if paper else (SCALE, 2, MIN_AREA)
+    small = im.getchannel("A").resize((w // scale, h // scale), Image.Resampling.BOX)
     sw, sh = small.size
     px = small.load()
     on = [[px[x, y] > 40 for x in range(sw)] for y in range(sh)]
     seen = [[False] * sw for _ in range(sh)]
-    found = []
+    parts = []
     for y0 in range(sh):
         for x0 in range(sw):
             if not on[y0][x0] or seen[y0][x0]:
@@ -68,41 +71,185 @@ def components(im: Image.Image) -> list[tuple[tuple[int, int, int, int], Image.I
                 x, y = q.popleft()
                 cells.append((x, y))
                 x1, x2, y1, y2 = min(x1, x), max(x2, x), min(y1, y), max(y2, y)
-                for dx in (-2, -1, 0, 1, 2):  # reach over 1px gaps (balloon strings, feathers)
-                    for dy in (-2, -1, 0, 1, 2):
+                for dx in range(-reach, reach + 1):  # reach over 1px gaps (balloon strings, feathers)
+                    for dy in range(-reach, reach + 1):
                         nx, ny = x + dx, y + dy
                         if 0 <= nx < sw and 0 <= ny < sh and on[ny][nx] and not seen[ny][nx]:
                             seen[ny][nx] = True
                             q.append((nx, ny))
-            if len(cells) < MIN_AREA:
-                continue
-            mask = Image.new("L", (sw, sh), 0)
-            mp = mask.load()
-            for x, y in cells:
-                for dx in (-1, 0, 1):  # a little margin for antialiased edges
-                    for dy in (-1, 0, 1):
-                        if 0 <= x + dx < sw and 0 <= y + dy < sh:
-                            mp[x + dx, y + dy] = 255
-            mask = mask.resize((w, h), Image.Resampling.NEAREST)
-            box = (x1 * SCALE, y1 * SCALE, min(w, (x2 + 1) * SCALE), min(h, (y2 + 1) * SCALE))
-            found.append((box, mask))
+            if len(cells) >= min_area:
+                parts.append({"box": [x1 * scale, y1 * scale, min(w, (x2 + 1) * scale), min(h, (y2 + 1) * scale)],
+                              "cells": cells})
+    if paper:
+        def is_bit(p):
+            x1, y1, x2, y2 = p["box"]
+            return x2 - x1 < 70 and y2 - y1 < 70
+        big = [p for p in parts if not is_bit(p)]
+        for bit in (p for p in parts if is_bit(p)):
+            x1, y1, x2, y2 = bit["box"]
+            if x1 < 30 or y1 < 30 or x2 > w - 30 or y2 > h - 30:
+                continue  # frame decoration
+            def gap(p):
+                a1, b1, a2, b2 = p["box"]
+                return max(a1 - x2, x1 - a2, 0) + max(b1 - y2, y1 - b2, 0)
+            near = min(big, key=gap, default=None)
+            if near is not None and gap(near) <= 20:
+                near["cells"] += bit["cells"]
+                b = near["box"]
+                near["box"] = [min(b[0], x1), min(b[1], y1), max(b[2], x2), max(b[3], y2)]
+        parts = big
+    found = []
+    for p in parts:
+        mask = Image.new("L", (sw, sh), 0)
+        mp = mask.load()
+        for x, y in p["cells"]:
+            for dx in (-1, 0, 1):  # a little margin for antialiased edges
+                for dy in (-1, 0, 1):
+                    if 0 <= x + dx < sw and 0 <= y + dy < sh:
+                        mp[x + dx, y + dy] = 255
+        found.append((tuple(p["box"]), mask.resize((w, h), Image.Resampling.NEAREST)))
     found.sort(key=lambda b: (b[0][1] // 120, b[0][0]))
     return found
 
 
-def cut_sheet(path: Path) -> list[tuple[Image.Image, tuple[int, int]]]:
-    """Each drawing of a sheet, made light, with its size in the sheet (that size sets how big it is drawn)."""
-    im = clean(Image.open(path).convert("RGBA"))
+def is_paper(r: int, g: int, b: int) -> bool:
+    """The warm parchment some sheets come drawn on."""
+    return r > 205 and 165 < g < 248 and 120 < b < 225 and r - b > 28 and r >= g >= b - 5
+
+
+def is_white(r: int, g: int, b: int) -> bool:
+    return r > 238 and g > 238 and b > 225
+
+
+def big_parts(mask: bytearray, w: int, h: int, min_area: int) -> bytearray:
+    """Only the connected parts of `mask` (1 = on) with at least `min_area` pixels."""
+    out = bytearray(w * h)
+    seen = bytearray(w * h)
+    for start in range(w * h):
+        if not mask[start] or seen[start]:
+            continue
+        seen[start] = 1
+        q = deque([start])
+        part = []
+        while q:
+            i = q.popleft()
+            part.append(i)
+            x = i % w
+            for j in (i - 1 if x else -1, i + 1 if x < w - 1 else -1, i - w, i + w):
+                if 0 <= j < w * h and mask[j] and not seen[j]:
+                    seen[j] = 1
+                    q.append(j)
+        if len(part) >= min_area:
+            for i in part:
+                out[i] = 1
+    return out
+
+
+def remove_paper(im: Image.Image) -> Image.Image:
+    """For a sheet drawn on opaque parchment ("papel" in escena.json): the big parchment areas, the white empty
+    blocks and the thin grid lines between them become transparent, then the white sticker halo around each
+    drawing is peeled off. Parchment closed inside a drawing (between an arm and the body) stays: it can't be
+    told apart from cream cloth."""
+    w, h = im.size
+    raw = im.convert("RGB").tobytes()
+    px = [(raw[k], raw[k + 1], raw[k + 2]) for k in range(0, len(raw), 3)]
+    white = bytearray(1 if is_white(*p) else 0 for p in px)
+    bg = big_parts(bytearray(1 if is_paper(*p) else 0 for p in px), w, h, 2500)
+    for i, on in enumerate(big_parts(white, w, h, 6000)):
+        if on:
+            bg[i] = 1
+    # Grid lines and specks: runs of up to 4 px with background on both sides, across or along.
+    for _ in range(2):
+        thin = []
+        for i in range(w * h):
+            if bg[i] or white[i]:
+                continue
+            x, y = i % w, i // w
+            for dx, dy in ((1, 0), (0, 1)):
+                before = after = False
+                for k in range(1, 5):
+                    xa, ya, xb, yb = x - dx * k, y - dy * k, x + dx * k, y + dy * k
+                    before = before or (0 <= xa < w and 0 <= ya < h and bg[ya * w + xa] == 1)
+                    after = after or (0 <= xb < w and 0 <= yb < h and bg[yb * w + xb] == 1)
+                if before and after:
+                    thin.append(i)
+                    break
+        for i in thin:
+            bg[i] = 1
+    # The sticker halo: light pixels touching the background, a few pixels deep.
+    for _ in range(5):
+        peel = []
+        for i in range(w * h):
+            if bg[i]:
+                continue
+            r, g, b = px[i]
+            if not (white[i] or is_paper(r, g, b) or (r > 225 and g > 205 and b > 175)):
+                continue
+            x = i % w
+            if (x and bg[i - 1]) or (x < w - 1 and bg[i + 1]) or (i >= w and bg[i - w]) or (i + w < w * h and bg[i + w]):
+                peel.append(i)
+        for i in peel:
+            bg[i] = 1
+    alpha = Image.frombytes("L", (w, h), bytes(0 if v else 255 for v in bg))
+    out = im.convert("RGBA")
+    out.putalpha(alpha)
+    return out
+
+
+def cut_sheet(path: Path, paper: bool = False, erase: list | None = None,
+              twin: Path | None = None) -> list[tuple[Image.Image, tuple[int, int], Image.Image | None]]:
+    """Each drawing of a sheet, made light, with its size in the sheet (that size sets how big it is drawn).
+    `erase`: rectangles [x1, y1, x2, y2] of the sheet to clear first (a frame ornament touching a drawing).
+    `twin`: the same sheet with closed eyes ("cerrados"); each drawing then also comes with its closed-eyes look,
+    cut with the same outline. Where the twin still shows parchment (spots retouched by hand only on the open
+    sheet), the open drawing is kept."""
+    im = Image.open(path).convert("RGBA")
+    if paper and im.getchannel("A").getextrema()[0] == 255:
+        im = remove_paper(im)  # still opaque: once retouched by hand it is saved transparent, and kept as is
+    im = clean(im)
+    for box in erase or []:
+        im.paste((0, 0, 0, 0), tuple(box))
+    closed_sheet = Image.open(twin).convert("RGBA") if twin else None
     sprites = []
-    for box, mask in components(im):
+    for box, mask in components(im, paper):
         own = Image.new("RGBA", im.size, (0, 0, 0, 0))
         own.paste(im, (0, 0), mask)
         sprite = own.crop(box)
-        sprite = sprite.crop(sprite.getbbox())
+        bbox = sprite.getbbox()
+        sprite = sprite.crop(bbox)
         native = sprite.size
+        closed = None
+        if closed_sheet is not None:
+            x, y = box[0] + bbox[0], box[1] + bbox[1]
+            closed = closed_sheet.crop((x, y, x + native[0], y + native[1]))
+            op, cp = sprite.load(), closed.load()
+            for j in range(native[1]):
+                for i in range(native[0]):
+                    r, g, b, a = cp[i, j]
+                    cp[i, j] = op[i, j] if is_paper(r, g, b) or is_white(r, g, b) else (r, g, b, op[i, j][3])
+            closed.thumbnail((SPRITE_MAX, SPRITE_MAX), Image.Resampling.LANCZOS)
         sprite.thumbnail((SPRITE_MAX, SPRITE_MAX), Image.Resampling.LANCZOS)
-        sprites.append((sprite, native))
+        sprites.append((sprite, native, closed))
     return sprites
+
+
+def eyes_patch(sprite: Image.Image, closed: Image.Image) -> tuple[Image.Image, list[float]]:
+    """The smallest piece of the closed-eyes look that differs from the open one, and where it goes on the
+    drawing (x, y, w, h as fractions of its size). Blinking only swaps that piece in for a moment."""
+    w, h = sprite.size
+    op, cp = sprite.load(), closed.load()
+    diff = Image.new("L", (w, h), 0)
+    dp = diff.load()
+    for j in range(h):
+        for i in range(w):
+            a, b = op[i, j], cp[i, j]
+            if a[3] and sum(abs(a[k] - b[k]) for k in range(3)) > 90:
+                dp[i, j] = 255
+    diff = diff.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(5))  # drop lone redrawn pixels
+    box = diff.getbbox() or (0, 0, w, h)
+    patch = closed.crop(box)
+    return patch, [round(box[0] / w, 4), round(box[1] / h, 4), round((box[2] - box[0]) / w, 4),
+                   round((box[3] - box[1]) / h, 4)]
 
 
 def is_ground(r: int, g: int, b: int) -> bool:
@@ -133,7 +280,7 @@ def cut_prop(original: Image.Image, spec: dict) -> tuple[Image.Image, tuple[int,
 
 
 def contact_sheet(cuts: dict[str, list[tuple[Image.Image, tuple[int, int]]]], path: Path) -> None:
-    items = [(f"{sheet}#{i}", sp) for sheet, sprites in cuts.items() for i, (sp, _) in enumerate(sprites)]
+    items = [(f"{sheet}#{i}", sp) for sheet, sprites in cuts.items() for i, (sp, *_) in enumerate(sprites)]
     cell, cols = 210, 8
     rows = (len(items) + cols - 1) // cols
     out = Image.new("RGBA", (cols * cell, max(1, rows) * cell), (60, 110, 60, 255))
@@ -153,7 +300,7 @@ def export_cuts(folder: Path, cuts: dict, sheets: dict[str, int]) -> None:
         old.unlink()
     index = []
     for sheet, sprites in cuts.items():
-        for i, (sprite, (nw, nh)) in enumerate(sprites):
+        for i, (sprite, (nw, nh), *_) in enumerate(sprites):
             name = f"{Path(sheet).stem}-{i}.png"
             sprite.save(target / name)
             index.append({"recorte": f"{sheet}#{i}", "archivo": name, "nw": nw, "nh": nh})
@@ -280,7 +427,8 @@ def build(folder: Path, check: bool, seen_ids: set[str]) -> dict:
                       "base": spec["base"]})
 
     sheets = {h["archivo"]: h["celda"] for h in escena["hojas"]}
-    cuts = {sheet: cut_sheet(folder / sheet) for sheet in sheets}
+    cuts = {h["archivo"]: cut_sheet(folder / h["archivo"], h.get("papel", False), h.get("borrar"),
+                                     folder / h["cerrados"] if "cerrados" in h else None) for h in escena["hojas"]}
     if check:
         contact_sheet(cuts, folder / "_recortes.png")
         preview(bg, escena, folder / "_vista.png")
@@ -295,11 +443,11 @@ def build(folder: Path, check: bool, seen_ids: set[str]) -> dict:
         sprites = cuts[sheet]
         if int(index) >= len(sprites):
             raise SystemExit(f"{sid}: {p['recorte']} no existe ({sheet} tiene {len(sprites)} recortes)")
-        sprite, (nw, nh) = sprites[int(index)]
+        sprite, (nw, nh), closed = sprites[int(index)]
         sprite.save(out / f"{cid}.webp", quality=85, method=6)
         cell = sheets[sheet]
-        if p["ancho"] not in (1, 2):
-            raise SystemExit(f"{sid}: {cid} debe ocupar 1 o 2 cuadritos")
+        if p["ancho"] not in (1, 2, 3):
+            raise SystemExit(f"{sid}: {cid} debe ocupar 1, 2 o 3 cuadritos")
         # w: cells of floor it takes (1 or 2, one row deep). sw, sh: how big it looks, in cell widths.
         scale = p.get("escala", 1)  # for a drawing made bigger or smaller than the rest of its sheet
         entry = {"id": cid, "w": p["ancho"], "sw": round(nw * scale / cell, 2), "sh": round(nh * scale / cell, 2),
@@ -308,6 +456,18 @@ def build(folder: Path, check: bool, seen_ids: set[str]) -> dict:
             entry["top"] = p["encima"]  # where on its drawing another character can stand (0 = top edge)
         if p.get("cuelga"):
             entry["hang"] = True  # hangs from its feet on floors made for hanging
+        if p.get("tipo", "personaje") == "objeto":
+            entry["object"] = True  # a thing, not a character (rewards are drawn by kind)
+        if "capa" in p:
+            if p["capa"] not in ("delante", "detras"):
+                raise SystemExit(f"{sid}: {cid}: capa debe ser delante o detras")
+            entry["layer"] = "front" if p["capa"] == "delante" else "back"  # takes no room: others share its cells
+        if closed is not None:
+            patch, where = eyes_patch(sprite, closed)
+            patch.save(out / f"{cid}-ojos.webp", quality=85, method=6)
+            entry["blink"] = where  # x, y, w, h of the closed-eyes piece, as fractions of the drawing
+            if check:
+                print(f"  {cid}: ojos {where}")
         cast.append(entry)
 
     floors = []

@@ -36,6 +36,25 @@ Luego `python scripts/escenas.py --calibrar` abre el calibrador y el resto se ha
 > apoyados en el borde inferior de su casilla, mirando a la derecha, sin sombra en el suelo.
 > Estilo y luz iguales a [describe el fondo]. Personajes: [lista].
 
+### Hojas sobre pergamino
+
+Si la hoja viene con fondo de pergamino, marco y figuras juntas, en `escena.json` se marca con `"papel": true` y el
+script borra el pergamino. Revisa `_recortes.png`. Si quedan puntos del fondo, retócalos ahí mismo pintándolos del verde
+del fondo, o repíntalos con su color. Luego pídele a la IA que pase los retoques a la hoja: queda transparente y el
+original se guarda en `originales/`.
+
+### Personajes que parpadean
+
+Se pide una segunda hoja igual con los ojos cerrados y se pone en la hoja abierta como `"cerrados": "cerrados.png"`.
+No se genera de nuevo: se edita la hoja abierta con una herramienta que cambie solo una zona (inpainting), así todo lo
+demás queda idéntico y solo se guardan los ojos (un parche chiquito por personaje).
+
+> Cierra los ojos de todos los personajes, como si estuvieran parpadeando: una línea curva suave del mismo color del
+> contorno. No cambies nada más: misma pose, mismos colores, mismo tamaño y posición, mismo fondo.
+
+Mismo tamaño en píxeles que la hoja abierta, sin recortar ni mover nada. Si la hoja cerrada se redibuja entera, el
+parche termina siendo el personaje completo: pesa más y en cada parpadeo se nota un saltito.
+
 ## En el calibrador
 
 1. **Escena:** nombre, orden, con cuántos personajes ganados se abre y, por hoja, la `celda` (cuántos píxeles de la hoja mide un cuadrito; más grande = personajes más chicos).
@@ -46,7 +65,8 @@ Luego `python scripts/escenas.py --calibrar` abre el calibrador y el resto se ha
    El primero es el suelo principal. Ajusta columnas y filas; "Bloquear" marca celdas ocupadas por el decorado.
 3. **Objetos:** contorno de lo que debe tapar a los personajes de atrás (bancos, arbustos del frente) y su línea de base.
    Un piso que está encima de un objeto se marca con "objeto" para que quien se sube se dibuje sobre él.
-4. **Personajes:** marca "usar", ponle nombre y ancho (1 o 2 cuadritos). "encima" (0 = borde de arriba de su dibujo)
+4. **Personajes:** marca "usar", ponle nombre y ancho (1 a 3 cuadritos). "objeto" si es una cosa (cuenta así en el
+   sorteo de premios); "capa" detrás o delante si no ocupa lugar (alfombra, arco; macetero). "encima" (0 = borde de arriba de su dibujo)
    si otro puede pararse sobre él; "cuelga" si cuelga de sus patitas en los lugares para colgar; "escala" si en la hoja
    quedó más grande o más chico que los demás (con "Probar" lo comparas). "Probar" lo muestra sobre los pisos con su tamaño real.
 5. **Guardar y regenerar:** escribe `escena.json`, recorta y achica todo y regenera los datos. Recarga la extensión para verlo.
