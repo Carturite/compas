@@ -367,10 +367,13 @@ function setPersonaje(k) {
   const c = cuts[k];
   const card = document.querySelector(`[data-cuse="${k}"]`).closest('.cut');
   const use = card.querySelector('[data-cuse]').checked;
-  for (const [id, p] of Object.entries(escena.personajes)) if (p.recorte === c.recorte) delete escena.personajes[id];
+  let before = {};
+  for (const [id, p] of Object.entries(escena.personajes)) if (p.recorte === c.recorte) { before = p; delete escena.personajes[id]; }
   if (use) {
     const id = card.querySelector('[data-cid]').value.trim() || `${sid}-${k}`;
-    const entry = { recorte: c.recorte, ancho: Number(card.querySelector('[data-cw]').value), nombre: card.querySelector('[data-cname]').value.trim() || id };
+    // Fields without a control here (like "apoyo") are kept; the ones with a control are set again below.
+    const { encima, cuelga, escala, tipo, capa, ...rest } = before;
+    const entry = { ...rest, recorte: c.recorte, ancho: Number(card.querySelector('[data-cw]').value), nombre: card.querySelector('[data-cname]').value.trim() || id };
     const top = card.querySelector('[data-ctop]').value;
     if (top !== '') entry.encima = Math.min(1, Math.max(0, Number(top)));
     if (card.querySelector('[data-chang]').checked) entry.cuelga = true;

@@ -1,6 +1,6 @@
 import { backgroundScene, floorOf, floorsOf, sceneOfPiece, shapeSize, viewOf } from '../core/board.js';
 import type { Point } from '../core/perspective.js';
-import { blinkOf, hangs, homeOf, layerOf, lookSize, topOf } from '../core/scenes.js';
+import { blinkOf, footOf, hangs, homeOf, layerOf, lookSize, topOf } from '../core/scenes.js';
 import type { AppData, PieceKind, Placed, Placement } from '../core/types.js';
 import { isDevBuild } from '../platform/env.js';
 import { projection, type Projection } from './scene.js';
@@ -56,7 +56,7 @@ function spotAt(kind: PieceKind, x: number, y: number, cell: number, hanging: bo
   const look = lookSize(kind);
   const width = look.w * cell;
   const height = look.h * cell;
-  return { left: x - width / 2, top: hanging ? y : y - height, width, height, cell, depth };
+  return { left: x - width / 2, top: hanging ? y : y - height * footOf(kind), width, height, cell, depth };
 }
 
 /**

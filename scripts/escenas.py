@@ -456,6 +456,8 @@ def build(folder: Path, check: bool, seen_ids: set[str]) -> dict:
             entry["top"] = p["encima"]  # where on its drawing another character can stand (0 = top edge)
         if p.get("cuelga"):
             entry["hang"] = True  # hangs from its feet on floors made for hanging
+        if "apoyo" in p:
+            entry["foot"] = p["apoyo"]  # height of its drawing that rests on its cell (0 = top, 1 = bottom): rugs, 0.5
         if p.get("tipo", "personaje") == "objeto":
             entry["object"] = True  # a thing, not a character (rewards are drawn by kind)
         if "capa" in p:

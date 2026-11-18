@@ -44,6 +44,8 @@ export interface SceneData {
     top?: number;
     /** Hangs from its feet on hanging floors. */
     hang?: boolean;
+    /** Height of its drawing that rests on its cell (0 = top, 1 = bottom, the default): a rug lies on its middle. */
+    foot?: number;
     /** A thing (a drum, a rug), not a character: rewards are drawn by kind. */
     object?: boolean;
     /**
@@ -97,6 +99,11 @@ export function topOf(kind: CastId): number | undefined {
 
 export function hangs(kind: CastId): boolean {
   return INFO.get(kind)!.hang === true;
+}
+
+/** Height of its drawing that rests on its cell: 1 (its bottom edge) except for things lying flat, like rugs. */
+export function footOf(kind: CastId): number {
+  return INFO.get(kind)!.foot ?? 1;
 }
 
 /** A thing (a drum, a rug) rather than a character. */

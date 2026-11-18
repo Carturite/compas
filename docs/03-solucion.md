@@ -86,7 +86,8 @@ Basados en ciclos conocidos de concentración (Pomodoro y bloques largos), siemp
   - `personajes`: id → `recorte` (`hoja.png#n`), `ancho` (1 a 3 cuadritos) y `nombre`; opcional `encima` (altura de su
     dibujo, 0 = arriba, donde puede pararse otro personaje: mesa, tambor, sombrero), `cuelga`, `escala` (si en la hoja
     lo dibujaron más grande o más chico que el resto, como la bailarina del jardín, 0,75), `tipo: "objeto"` (para el
-    sorteo de premios) y `capa` (`detras` o `delante`: no ocupa lugar, ver abajo).
+    sorteo de premios), `capa` (`detras` o `delante`: no ocupa lugar, ver abajo) y `apoyo` (altura del dibujo que
+    descansa sobre su casilla, 0 = arriba, 1 = abajo por defecto: las alfombras, 0,5, se apoyan en su mitad).
 - **`scripts/escenas.py`** (herramienta, necesita Pillow; la extensión no tiene dependencias) recorta los personajes,
   limpia el halo casi invisible del recorte de fondo, recorta los objetos, achica todo a WebP en `public/escenas/<id>/`
   y genera `src/core/scenes.gen.ts`. Con `--check` deja `_recortes.png` (recortes numerados) y `_vista.png` (pisos y
