@@ -154,45 +154,65 @@ test('badge shows whole minutes left with an m', () => {
 // ---- Reward board ----
 
 import {
+  applyBoards,
   awardPiece,
   cellsAt,
   firstFit,
   fits,
+  kindFor,
   normalizePieces,
   piecesFromHistory,
   placePiece,
   PIECE_KINDS,
   shapeSize,
   unplacePiece,
+  viewOf,
+  withCatalog,
+  withView,
 } from '../src/core/board.js';
 import { completeNow } from '../src/core/machine.js';
-import { lookSize } from '../src/core/scenes.js';
+import { blinkOf, isObject, layerOf, lookSize, SCENES } from '../src/core/scenes.js';
 import { sceneAt } from '../src/core/board.js';
 
 // The garden's lawn.
 const BOARD_COLS = 10;
 const BOARD_ROWS = 5;
-import type { Piece } from '../src/core/types.js';
+const CIRCUS = 1;
+const THEATRE = 2;
+import type { Piece, Placed } from '../src/core/types.js';
 
-/** Every taken cell, as scene/floor:x,y, to check for overlaps. */
-const cellKeys = (pieces: readonly Piece[]) =>
+/** Every taken cell of one scene's view, as layer|scene/floor:x,y, to check for overlaps. */
+const cellKeys = (pieces: readonly Placed[]) =>
   pieces.flatMap((p) =>
-    p.placed ? cellsAt(p.kind, p.placed).map((c) => `${sceneAt(p.placed!)}/${p.placed!.floor ?? 0}:${c}`) : [],
+    p.placed && p.placed.on === undefined
+      ? cellsAt(p.kind, p.placed).map(
+          (c) => `${layerOf(p.kind) ?? 'room'}|${sceneAt(p.placed!)}/${p.placed!.floor ?? 0}:${c}`,
+        )
+      : [],
   );
+/** The same over every scene of stored pieces. */
+const allCells = (pieces: readonly Piece[]) => SCENES.flatMap((_, s) => cellKeys(viewOf(pieces, s)));
 
-const piece = (id: string, kind: Piece['kind'], placed: Piece['placed']): Piece => ({
+/** A piece as one scene sees it. */
+const piece = (id: string, kind: Placed['kind'], placed: Placed['placed']): Placed => ({
   id,
   kind,
   earnedAt: T0,
   placed,
 });
+/** Stored pieces with (at most) the one spot each view gives them. */
+const owned = (...views: Placed[]): Piece[] =>
+  views.map((v) => ({ id: v.id, kind: v.kind, earnedAt: v.earnedAt, spots: v.placed ? [v.placed] : [] }));
+const inGarden = (pieces: readonly Piece[]) => viewOf(pieces, 0);
 
-test('every character takes 1 or 2 cells, one row deep, and keeps its drawing proportions', () => {
-  assert.ok(PIECE_KINDS.length >= 50);
-  assert.ok(PIECE_KINDS.every((k) => [1, 2].includes(shapeSize(k).w) && shapeSize(k).h === 1));
+test('every piece takes 1 to 3 cells, one row deep, and keeps its drawing proportions', () => {
+  assert.ok(PIECE_KINDS.length >= 100);
+  assert.ok(PIECE_KINDS.every((k) => [1, 2, 3].includes(shapeSize(k).w) && shapeSize(k).h === 1));
   assert.deepEqual(shapeSize('1-06'), { w: 1, h: 1 }, 'stretching up takes one cell…');
   assert.ok(lookSize('1-06').h > 1.4 * lookSize('1-06').w, '…but looks tall');
   assert.deepEqual(shapeSize('circo-tambor'), { w: 2, h: 1 }, 'the drum is wide');
+  assert.deepEqual(shapeSize('teatro-trono'), { w: 2, h: 1 }, 'so is the throne');
+  assert.deepEqual(shapeSize('teatro-arco'), { w: 3, h: 1 }, 'the arch spans three');
   assert.deepEqual(cellsAt('circo-canon', { x: 3, y: 1, flip: true }), [[3, 1], [4, 1]]);
 });
 
@@ -218,9 +238,10 @@ test('earned pieces land on the boards, and go to the tray when everything is fu
   let pieces: Piece[] = [];
   for (let i = 0; i < 200; i++) pieces = awardPiece(pieces, T0 + i * MINUTE);
   assert.equal(pieces.length, 200);
-  assert.ok(pieces[0]!.placed);
-  assert.equal(new Set(cellKeys(pieces)).size, cellKeys(pieces).length, 'no overlaps');
-  assert.ok(pieces.some((p) => p.placed === null), 'the rest wait in the tray, never lost');
+  const garden = inGarden(pieces);
+  assert.ok(garden[0]!.placed);
+  assert.equal(new Set(cellKeys(garden)).size, cellKeys(garden).length, 'no overlaps');
+  assert.ok(garden.some((p) => p.placed === null), 'the rest wait in the tray, never lost');
 });
 
 test('placing moves a piece only when it fits', () => {
@@ -230,6 +251,34 @@ test('placing moves a piece only when it fits', () => {
   assert.deepEqual(moved[1]!.placed, { x: 5, y: 2, flip: true, z: 1 }, 'z: placed last, in front at its depth');
   assert.equal(placePiece(pieces, 'zzz', { x: 5, y: 2, flip: false }), pieces);
   assert.equal(unplacePiece(moved, 'b')[1]!.placed, null);
+});
+
+test('every piece can stand once in each scene, and each scene has its own tray', () => {
+  let pieces = owned(piece('a', '1-09', { x: 0, y: 0, flip: false }));
+  assert.equal(viewOf(pieces, CIRCUS)[0]!.placed, null, 'placed in the garden, still in the circus tray');
+  const circus = placePiece(viewOf(pieces, CIRCUS), 'a', { x: 2, y: 1, flip: true, scene: 'circo' });
+  pieces = withView(pieces, CIRCUS, circus);
+  assert.equal(pieces[0]!.spots.length, 2);
+  assert.deepEqual(inGarden(pieces)[0]!.placed, { x: 0, y: 0, flip: false }, 'the garden keeps its spot');
+  pieces = withView(pieces, CIRCUS, unplacePiece(viewOf(pieces, CIRCUS), 'a'));
+  assert.ok(inGarden(pieces)[0]!.placed, 'back to the circus tray, still in the garden');
+  assert.equal(viewOf(pieces, CIRCUS)[0]!.placed, null);
+});
+
+test('rugs, arches and flower boxes take no room: rugs and arches go behind, flower boxes in front', () => {
+  assert.equal(layerOf('teatro-alfombra'), 'back');
+  assert.equal(layerOf('teatro-arco'), 'back');
+  assert.equal(layerOf('teatro-macetero'), 'front');
+  assert.equal(layerOf('teatro-zorro-laud'), undefined);
+  const at = { x: 2, y: 1, flip: false, scene: 'teatro' };
+  const arch = [piece('r', 'teatro-arco', at)];
+  assert.ok(fits(arch, 'teatro-zorro-laud', at), 'someone can stand under the arch');
+  assert.ok(fits(arch, 'teatro-zorro-laud', { ...at, x: 4 }), 'in any of its three cells');
+  assert.ok(fits(arch, 'teatro-macetero', at), 'a flower box is on another layer');
+  assert.ok(!fits(arch, 'teatro-alfombra', { ...at, x: 3 }), 'a rug and an arch do not overlap');
+  const fox = [piece('f', 'teatro-zorro-laud', at)];
+  assert.ok(fits(fox, 'teatro-alfombra', at), 'a rug can go under someone already there');
+  assert.ok(!fits([piece('t', 'teatro-mesa', at)], 'teatro-alfombra', { x: 0, y: 0, flip: false, on: 't' }), 'nothing that takes no room goes on top');
 });
 
 test('completing a session earns exactly one piece; cancelling earns none and takes none', () => {
@@ -259,12 +308,15 @@ test('old data gets one piece per completed session; bad stored pieces are clean
     { at: T0 + 2, day: dayKey(T0), outcome: 'completed', profile: 'gentle', focusedMinutes: 25 },
   ];
   assert.equal(piecesFromHistory(history).length, 2);
-  const cleaned = normalizePieces([
-    piece('a', 'circo-canon', { x: 0, y: 0, flip: false }),
-    piece('b', 'circo-canon', { x: 1, y: 0, flip: false }), // overlaps a
-    { id: 'c', kind: 'X' },
-    null,
-  ]);
+  // Data from before every scene had its own spots: one `placed` each.
+  const cleaned = inGarden(
+    normalizePieces([
+      piece('a', 'circo-canon', { x: 0, y: 0, flip: false }),
+      piece('b', 'circo-canon', { x: 1, y: 0, flip: false }), // overlaps a
+      { id: 'c', kind: 'X' },
+      null,
+    ]),
+  );
   assert.equal(cleaned.length, 2);
   // The overlapping piece finds a free spot instead of being lost.
   assert.deepEqual(cleaned[0]!.placed, { x: 0, y: 0, flip: false });
@@ -274,10 +326,11 @@ test('old data gets one piece per completed session; bad stored pieces are clean
 test('pieces whose spot no longer works move to free spots of their scene, or the tray', () => {
   const outside = Array.from({ length: 60 }, (_, i) => piece(`o${i}`, 'circo-canon', { x: 12 + i, y: 7, flip: false }));
   const kept = piece('k', 'circo-canon', { x: 0, y: 0, flip: false });
-  const result = normalizePieces([...outside, kept]);
+  const stored = normalizePieces([...outside, kept]);
+  const result = inGarden(stored);
   assert.deepEqual(result.at(-1)!.placed, kept.placed, 'valid spots win over moved pieces');
   assert.equal(new Set(cellKeys(result)).size, cellKeys(result).length, 'no overlaps');
-  assert.ok(result.every((p) => !p.placed || sceneAt(p.placed) === 0), 'they stay in the garden');
+  assert.ok(stored.every((p) => p.spots.every((s) => sceneAt(s) === 0)), 'they stay in the garden');
   assert.ok(result.some((p) => p.placed === null), 'extra pieces wait in the tray');
   assert.equal(result.length, 61);
 });
@@ -300,7 +353,7 @@ test('synced data survives the compact text form', () => {
   assert.deepEqual(back.pieces, d.pieces);
   assert.equal(back.settings.dailyMinutes, 120);
   assert.equal('syncEnabled' in back.settings, false);
-  assert.equal(decode('{"v":3}'), null);
+  assert.equal(decode('{"v":9}'), null);
   assert.equal(decode('no es json'), null);
 });
 
@@ -311,14 +364,32 @@ test('four-block pieces from before become kittens, the same on every device, an
   assert.deepEqual(a.pieces.map((p) => p.id), ['pa', 'pb']);
   assert.ok(a.pieces.every((p) => PIECE_KINDS.includes(p.kind)));
   assert.deepEqual(a.pieces, b.pieces);
-  assert.ok(a.pieces[0]!.placed, 'a piece that was on the board finds a new spot');
-  assert.equal(a.pieces[1]!.placed, null, 'a piece in the tray stays there');
+  assert.ok(inGarden(a.pieces)[0]!.placed, 'a piece that was on the board finds a new spot');
+  assert.equal(inGarden(a.pieces)[1]!.placed, null, 'a piece in the tray stays there');
 });
 
-test('new characters are ones not collected yet, from every cast', () => {
-  let pieces: Piece[] = [];
-  for (let i = 0; i < 40; i++) pieces = awardPiece(pieces, T0 + i * MINUTE);
-  assert.equal(new Set(pieces.map((p) => p.kind)).size, pieces.length, 'no repeats while some are missing');
+test('version 2 rows (one spot each) still read, stacks included', () => {
+  const v2 = JSON.stringify({
+    v: 2,
+    h: [],
+    p: [
+      ['pa', 'circo-tambor', T0, 1, 0, 1, 0, 'circo'],
+      ['pb', '1-09', T0, 'pa', 0],
+    ],
+    z: { pa: 4 },
+    ba: 5,
+  });
+  const back = decode(v2)!.pieces;
+  assert.deepEqual(back[0]!.spots, [{ x: 1, y: 0, flip: true, scene: 'circo', z: 4 }]);
+  assert.deepEqual(back[1]!.spots, [{ x: 0, y: 0, flip: false, on: 'pa', scene: 'circo' }], 'on the drum, in the circus');
+});
+
+test('rewards are drawn by kind (things, characters, characters that blink) and can repeat', () => {
+  const seen = { object: 0, character: 0, blink: 0 };
+  const kinds = Array.from({ length: 600 }, (_, i) => kindFor(T0 + i * 7919));
+  for (const k of kinds) seen[isObject(k) ? 'object' : blinkOf(k) ? 'blink' : 'character']++;
+  for (const n of Object.values(seen)) assert.ok(n > 150, `each kind about a third of the time (${JSON.stringify(seen)})`);
+  assert.ok(new Set(kinds.slice(0, 60)).size < 60, 'the same piece can come twice');
 });
 
 test('chunks stay under the per-item limit and join back exactly', () => {
@@ -346,7 +417,7 @@ test('merging joins history and pieces from both devices without losing any', ()
   const merged = merge(a, toSynced(b));
   assert.equal(merged.history.length, 3);
   assert.equal(merged.pieces.length, 3);
-  assert.equal(new Set(cellKeys(merged.pieces)).size, cellKeys(merged.pieces).length, 'no overlaps');
+  assert.equal(new Set(allCells(merged.pieces)).size, allCells(merged.pieces).length, 'no overlaps');
   // Merging again changes nothing.
   assert.deepEqual(merge(merged, toSynced(merged)).pieces, merged.pieces);
 });
@@ -371,6 +442,16 @@ test('two devices converge after one round trip', () => {
   assert.equal(encode(toSynced(b2)), encode(toSynced(a2)));
 });
 
+test('development builds have every piece at hand, and those pieces never travel', () => {
+  const d = deviceWith([T0]);
+  const all = withCatalog(d.pieces);
+  assert.equal(new Set(all.map((p) => p.kind)).size, PIECE_KINDS.length);
+  assert.equal(withCatalog(all).length, all.length, 'added once');
+  const dev = { ...d, pieces: all };
+  assert.deepEqual(toSynced(dev).pieces, d.pieces, 'only real pieces are shared');
+  assert.equal(nextUnlock(all)?.left, nextUnlock(d.pieces)?.left, 'and only real ones open scenes');
+});
+
 import { applyBoard, layoutOf } from '../src/core/board.js';
 
 test('saving the board applies every position at once, or none', () => {
@@ -380,6 +461,21 @@ test('saving the board applies every position at once, or none', () => {
   const clash = applyBoard(pieces, { b: { x: 0, y: 0, flip: false } }); // a is still there
   assert.equal(clash, pieces);
   assert.equal(applyBoard(pieces, { a: null })[0]!.placed, null);
+});
+
+test('saving several scenes at once changes all of them or none', () => {
+  const pieces = owned(piece('a', '1-09', { x: 0, y: 0, flip: false }), piece('b', '1-12', null));
+  const ok = applyBoards(pieces, {
+    jardin: { a: { x: 3, y: 2, flip: false }, b: null },
+    circo: { a: { x: 0, y: 0, flip: false, scene: 'circo' }, b: { x: 1, y: 0, flip: false, scene: 'circo' } },
+  });
+  assert.deepEqual(inGarden(ok)[0]!.placed, { x: 3, y: 2, flip: false });
+  assert.deepEqual(viewOf(ok, CIRCUS)[1]!.placed, { x: 1, y: 0, flip: false, scene: 'circo' });
+  const clash = { a: { x: 0, y: 0, flip: false, scene: 'circo' }, b: { x: 0, y: 0, flip: false, scene: 'circo' } };
+  assert.equal(applyBoards(pieces, { jardin: { a: { x: 3, y: 2, flip: false } }, circo: clash }), pieces);
+  const misfiled = { a: { x: 0, y: 0, flip: false } };
+  assert.equal(applyBoards(pieces, { circo: misfiled }), pieces, 'a garden spot listed under the circus');
+  assert.equal(applyBoards(pieces, { luna: {} }), pieces);
 });
 
 // ---- Perspective ----
@@ -426,36 +522,44 @@ test('raised floors hold characters that fit them, and scenery cells hold none',
 test('when the lawn is full, characters go up to the raised floors', () => {
   let pieces: Piece[] = [];
   for (let i = 0; i < 60; i++) pieces = awardPiece(pieces, T0 + i * MINUTE);
-  assert.ok(pieces.some((p) => (p.placed?.floor ?? 0) > 0));
+  assert.ok(inGarden(pieces).some((p) => (p.placed?.floor ?? 0) > 0));
+});
+
+test('the theatre has its stage, its boxes and its stairs', () => {
+  const ids = floorsOf(THEATRE).map((f) => f.id);
+  for (const id of ['tablas', 'proscenio', 'pie', 'palco-izq-arriba', 'palco-der-abajo', 'escalera-izq-1']) {
+    assert.ok(ids.includes(id), id);
+  }
+  const boxes = floorsOf(THEATRE).filter((f) => f.id.startsWith('palco-'));
+  assert.equal(boxes.reduce((n, f) => n + f.cols * f.rows, 0), 8, 'eight places in the boxes');
 });
 
 test('floor and scene travel between devices', () => {
   const d = {
     ...deviceWith([T0]),
-    pieces: [
+    pieces: owned(
       piece('a', 'circo-tambor', { x: 0, y: 0, flip: true, floor: 3 }),
       piece('b', '1-09', { x: 1, y: 0, flip: false, floor: 4, scene: 'circo' }),
-    ],
+    ),
   };
   const back = decode(encode(toSynced(d)))!.pieces;
-  assert.deepEqual(back[0]!.placed, { x: 0, y: 0, flip: true, floor: 3 });
-  assert.deepEqual(back[1]!.placed, { x: 1, y: 0, flip: false, floor: 4, scene: 'circo' });
+  assert.deepEqual(inGarden(back)[0]!.placed, { x: 0, y: 0, flip: true, floor: 3 });
+  assert.deepEqual(viewOf(back, CIRCUS)[1]!.placed, { x: 1, y: 0, flip: false, floor: 4, scene: 'circo' });
 });
 
 // ---- Scenes ----
 
-test('backgrounds open with characters earned; development opens them all', () => {
+test('backgrounds open with pieces earned; development opens them all', () => {
   assert.deepEqual(openScenes([]), [0]);
-  assert.deepEqual(openScenes([], true), [0, 1]);
+  assert.deepEqual(openScenes([], true), [0, 1, 2]);
   let pieces: Piece[] = [];
   for (let i = 0; i < 14; i++) pieces = awardPiece(pieces, T0 + i * MINUTE);
   assert.deepEqual(openScenes(pieces), [0]);
   assert.deepEqual(nextUnlock(pieces), { scene: 1, left: 1 });
   assert.equal(justOpened(pieces), -1);
   pieces = awardPiece(pieces, T0 + 20 * MINUTE);
-  assert.deepEqual(openScenes(pieces), [0, 1], 'the 15th character opens the circus');
+  assert.deepEqual(openScenes(pieces), [0, 1], 'the 15th piece opens the circus');
   assert.equal(justOpened(pieces), 1, 'and says so once');
-  assert.equal(nextUnlock(pieces), null);
   pieces = awardPiece(pieces, T0 + 21 * MINUTE);
   assert.equal(justOpened(pieces), -1);
 });
@@ -468,9 +572,10 @@ test('any character can stand in any scene', () => {
   assert.ok(fits([kitten], 'circo-tucan', { x: 0, y: 0, flip: false, scene: 'circo' }), 'garden cells do not block the circus');
 });
 
-test('new characters arrive in the chosen scene, and the background follows settings when it is open', () => {
-  const [p] = awardPiece([], T0, 1);
-  assert.equal(p!.placed?.scene, 'circo');
+test('new pieces arrive in the chosen scene, and the background follows settings when it is open', () => {
+  const [p] = awardPiece([], T0, CIRCUS);
+  assert.equal(p!.spots[0]?.scene, 'circo');
+  assert.equal(inGarden([p!])[0]!.placed, null, 'and wait in the garden tray');
   const data = { pieces: [], settings: { ...fresh().settings, scene: 'circo' } };
   assert.equal(backgroundScene(data), 0, 'the circus is still closed');
   assert.equal(backgroundScene(data, true), 1, 'development shows it');
@@ -487,6 +592,7 @@ test('a device writes only when it brings something new, so versions never ping-
   assert.equal(hasNews(merge(a, older), older), false, 'a difference in form alone is not news');
   const b = completeNow(a, T0 + 30 * MINUTE);
   assert.equal(hasNews(b, shared), true, 'a new piece and session are news');
+  assert.equal(hasNews({ ...a, pieces: withCatalog(a.pieces) }, shared), false, 'development pieces are not news');
 });
 
 // ---- Characters on top of others ----
@@ -518,9 +624,21 @@ test('stacks never loop, survive saving and travel between devices', () => {
   const saved = applyBoard(pieces, layoutOf(pieces));
   assert.deepEqual(saved, pieces);
   assert.equal(applyBoard(pieces, { h: { x: 0, y: 0, flip: false, on: 'nadie' } }), pieces);
-  const back = decode(encode(toSynced({ ...deviceWith([T0]), pieces })))!.pieces;
-  assert.deepEqual(back.find((p) => p.id === 'h')!.placed, { x: 0, y: 0, flip: false, on: 'd' });
-  assert.equal(normalizePieces([hat])[0]!.placed, null, 'without its base it waits in the tray');
+  const back = decode(encode(toSynced({ ...deviceWith([T0]), pieces: owned(...pieces) })))!.pieces;
+  assert.deepEqual(inGarden(back).find((p) => p.id === 'h')!.placed, { x: 0, y: 0, flip: false, on: 'd' });
+  assert.equal(inGarden(normalizePieces([hat]))[0]!.placed, null, 'without its base it waits in the tray');
+});
+
+test('a stack in another scene keeps its scene', () => {
+  const view = [
+    piece('d', 'circo-tambor', { x: 1, y: 0, flip: false, scene: 'circo' }),
+    piece('h', 'circo-sombrero', { x: 0, y: 0, flip: false, on: 'd' }),
+  ];
+  const stored = withView(owned(piece('d', 'circo-tambor', null), piece('h', 'circo-sombrero', null)), CIRCUS, view);
+  assert.deepEqual(stored[1]!.spots, [{ x: 0, y: 0, flip: false, on: 'd', scene: 'circo' }]);
+  const back = decode(encode(toSynced({ ...deviceWith([T0]), pieces: stored })))!.pieces;
+  assert.deepEqual(viewOf(back, CIRCUS), view);
+  assert.equal(inGarden(back)[1]!.placed, null);
 });
 
 // ---- Who is in front ----
@@ -528,13 +646,13 @@ test('stacks never loop, survive saving and travel between devices', () => {
 import { nextZ } from '../src/core/board.js';
 
 test('the last piece placed or earned is in front at its depth, and that order travels between devices', () => {
-  let pieces: Piece[] = [piece('a', '1-09', { x: 0, y: 0, flip: false }), piece('b', '1-12', { x: 1, y: 0, flip: false })];
-  assert.equal(nextZ(pieces), 1);
-  pieces = placePiece(pieces, 'a', { x: 2, y: 0, flip: false });
-  pieces = placePiece(pieces, 'b', { x: 3, y: 0, flip: false });
-  assert.ok(pieces[1]!.placed!.z! > pieces[0]!.placed!.z!, 'b was placed after a');
-  pieces = awardPiece(pieces, T0);
-  assert.equal(pieces[2]!.placed!.z, 3, 'a new piece goes in front too');
+  let view: Placed[] = [piece('a', '1-09', { x: 0, y: 0, flip: false }), piece('b', '1-12', { x: 1, y: 0, flip: false })];
+  assert.equal(nextZ(view), 1);
+  view = placePiece(view, 'a', { x: 2, y: 0, flip: false });
+  view = placePiece(view, 'b', { x: 3, y: 0, flip: false });
+  assert.ok(view[1]!.placed!.z! > view[0]!.placed!.z!, 'b was placed after a');
+  const pieces = awardPiece(withView(owned(...view), 0, view), T0);
+  assert.equal(inGarden(pieces)[2]!.placed!.z, 3, 'a new piece goes in front too');
   const back = decode(encode(toSynced({ ...deviceWith([T0]), pieces })))!.pieces;
-  assert.deepEqual(back.map((p) => p.placed?.z), [1, 2, 3]);
+  assert.deepEqual(inGarden(back).map((p) => p.placed?.z), [1, 2, 3]);
 });

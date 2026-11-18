@@ -1,7 +1,7 @@
-import { backgroundScene, floorOf, floorsOf, sceneOfPiece, shapeSize } from '../core/board.js';
+import { backgroundScene, floorOf, floorsOf, sceneOfPiece, shapeSize, viewOf } from '../core/board.js';
 import type { Point } from '../core/perspective.js';
-import { hangs, homeOf, lookSize, topOf } from '../core/scenes.js';
-import type { AppData, Piece, PieceKind, Placement } from '../core/types.js';
+import { blinkOf, hangs, homeOf, layerOf, lookSize, topOf } from '../core/scenes.js';
+import type { AppData, PieceKind, Placed, Placement } from '../core/types.js';
 import { isDevBuild } from '../platform/env.js';
 import { projection, type Projection } from './scene.js';
 
@@ -9,6 +9,9 @@ import { projection, type Projection } from './scene.js';
  * Scene drawing shared by every page: the scene's picture, and the characters placed in it standing on
  * its floors in perspective. Each is as big as its drawing says (in cell widths at that depth); closer ones
  * are bigger and are drawn later, so they cover the ones behind. Scenery props sort among them the same way.
+ * Pieces that take no room (a rug, an arch) go behind whoever shares their row; a flower box goes in front.
+ * Characters that blink get their closed-eyes piece on top, shown for a moment by CSS alone (base.css):
+ * each one at its own pace, so nothing runs in JavaScript.
  */
 
 /** Characters stand a little inside the front edge of their cells, not on the line itself. */
@@ -63,7 +66,7 @@ function spotAt(kind: PieceKind, x: number, y: number, cell: number, hanging: bo
  */
 function spotOf(
   view: Projection,
-  pieces: readonly Piece[],
+  pieces: readonly Placed[],
   kind: PieceKind,
   at: Placement,
   seen = 0,
@@ -88,18 +91,52 @@ function spotOf(
 }
 
 /** Placement order for drawing; someone standing on another piece is always right above it. */
-function orderOf(pieces: readonly Piece[], piece: Piece, hops = 0): number {
+function orderOf(pieces: readonly Placed[], piece: Placed, hops = 0): number {
   const on = piece.placed?.on;
   if (on === undefined || hops > pieces.length) return piece.placed?.z ?? 0;
   const base = pieces.find((p) => p.id === on);
   return base ? orderOf(pieces, base, hops + 1) + 0.001 : 0;
 }
 
-function sprite(kind: PieceKind, flip: boolean, spot: Spot, cls: string, attrs = ''): string {
+/** A small number from a piece id, the same on every page, to give each character its own blinking pace. */
+function seedOf(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/**
+ * The closed eyes of a character that blinks, over its drawing. It shows for a moment every 35 to 55 seconds
+ * (sometimes twice in a row), starting at a different point for each one.
+ */
+function eyes(kind: PieceKind, id: string, spot: Spot): string {
+  const at = blinkOf(kind);
+  if (!at || !id) return '';
+  const look = lookSize(kind);
+  // The drawing keeps its proportions inside the spot, centred and standing on its bottom edge.
+  const k = Math.min(spot.width / look.w, spot.height / look.h);
+  const w = look.w * k;
+  const h = look.h * k;
+  const x0 = spot.left + (spot.width - w) / 2;
+  const y0 = spot.top + spot.height - h;
+  const seed = seedOf(id);
+  const every = 35 + (seed % 21);
+  const delay = -((seed >>> 8) % (every * 10)) / 10;
+  const twice = (seed >>> 16) % 3 === 0 ? ' twice' : '';
+  const [bx = 0, by = 0, bw = 1, bh = 1] = at;
+  return `<image class="blink${twice}" href="${artUrl(kind).replace(/\.webp$/, '-ojos.webp')}" x="${n(x0 + bx * w)}" y="${n(y0 + by * h)}" width="${n(bw * w)}" height="${n(bh * h)}" preserveAspectRatio="none" style="animation-duration:${every}s;animation-delay:${delay}s"></image>`;
+}
+
+function sprite(kind: PieceKind, flip: boolean, spot: Spot, cls: string, attrs = '', id = ''): string {
   const { left, top, width, height } = spot;
   const mirror = flip ? ` transform="matrix(-1 0 0 1 ${n(2 * left + width)} 0)"` : '';
-  return `<image class="${cls}" href="${artUrl(kind)}" x="${n(left)}" y="${n(top)}" width="${n(width)}" height="${n(height)}" preserveAspectRatio="xMidYMax meet"${mirror}${attrs}></image>`;
+  const image = `<image class="${cls}" href="${artUrl(kind)}" x="${n(left)}" y="${n(top)}" width="${n(width)}" height="${n(height)}" preserveAspectRatio="xMidYMax meet"${attrs}></image>`;
+  const closed = eyes(kind, id, spot);
+  return closed ? `<g${mirror}>${image}${closed}</g>` : image.replace('<image ', `<image${mirror} `);
 }
+
+/** At the same depth: rugs and arches first, then everyone else by placement order, then flower boxes. */
+const LAYER_ORDER = { back: -1e9, room: 0, front: 1e9 } as const;
 
 export interface BoardExtras {
   /** Which scene to draw (index); by default the first. */
@@ -114,7 +151,8 @@ export interface BoardExtras {
   fit?: 'cover' | 'contain';
 }
 
-export function boardSvg(pieces: readonly Piece[], extras: BoardExtras = {}): string {
+/** Pieces of one scene (`viewOf`), drawn in it. */
+export function boardSvg(pieces: readonly Placed[], extras: BoardExtras = {}): string {
   const index = extras.scene ?? 0;
   const view = projection(index);
   const { scene, art } = view;
@@ -154,15 +192,15 @@ export function boardSvg(pieces: readonly Piece[], extras: BoardExtras = {}): st
     const lifted = p.id === extras.liftedId ? ' lifted' : '';
     items.push({
       depth: spot.depth,
-      z: orderOf(pieces, p),
-      svg: sprite(p.kind, p.placed.flip, spot, `piece${lifted}`, ` data-piece="${p.id}"`),
+      z: orderOf(pieces, p) + LAYER_ORDER[layerOf(p.kind) ?? 'room'],
+      svg: sprite(p.kind, p.placed.flip, spot, `piece${lifted}`, ` data-piece="${p.id}"`, lifted ? '' : p.id),
     });
   }
   const ghostSpot = g ? spotOf(view, pieces, g.kind, g.placement) : null;
   if (g && ghostSpot) {
     items.push({
       depth: ghostSpot.depth + 0.0005,
-      z: Number.MAX_SAFE_INTEGER,
+      z: Number.MAX_SAFE_INTEGER / 2 + LAYER_ORDER[layerOf(g.kind) ?? 'room'],
       svg: sprite(g.kind, g.placement.flip, ghostSpot, `ghost${g.ok ? '' : ' no-fit'}`),
     });
   }
@@ -192,11 +230,12 @@ export function sceneToShow(data: Pick<AppData, 'pieces' | 'settings'>): number 
 
 /** Draws the chosen scene behind the page. */
 export function mountScene(data: Pick<AppData, 'pieces' | 'settings'>): void {
-  mountBackground(data.pieces, { scene: sceneToShow(data) });
+  const scene = sceneToShow(data);
+  mountBackground(viewOf(data.pieces, scene), { scene });
 }
 
 /** Draws a scene behind the page (or, while editing, with the editor extras). Cheap to call often. */
-export function mountBackground(pieces: readonly Piece[], extras: BoardExtras = {}): void {
+export function mountBackground(pieces: readonly Placed[], extras: BoardExtras = {}): void {
   const host = document.querySelector<HTMLElement>('.board-bg');
   if (!host) return;
   const key = JSON.stringify([pieces, extras]);

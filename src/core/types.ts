@@ -54,14 +54,25 @@ export interface Placement {
   floor?: number;
   /** Scene id (core/scenes.ts); absent means the garden, where everything lived before scenes. */
   scene?: string;
-  /** Standing on top of another piece (its id) that has room on top: then x, y, floor and scene follow that piece. */
+  /** Standing on top of another piece (its id) that has room on top: then x, y and floor follow that piece. */
   on?: string;
   /** Placement order: higher = placed later. Among pieces at the same depth, the last one placed is drawn in front. */
   z?: number;
 }
 
-/** One kitten earned by completing a focus session. `placed: null` = waiting in the tray. */
+/**
+ * One piece earned by completing a focus session. It can stand once in every scene: `spots` holds at most one
+ * placement per scene (each says its scene). A scene without a spot for it shows it in that scene's tray.
+ */
 export interface Piece {
+  id: string;
+  kind: PieceKind;
+  earnedAt: number;
+  spots: Placement[];
+}
+
+/** A piece as seen in one scene: where it stands there, or null while it waits in that scene's tray. */
+export interface Placed {
   id: string;
   kind: PieceKind;
   earnedAt: number;
@@ -91,10 +102,8 @@ export type Command =
   | { type: 'endBreak' }
   | { type: 'getSnapshot' }
   | { type: 'saveSettings'; settings: Partial<Settings> }
-  /** The editor's "Guardar": every piece position at once. */
-  | { type: 'saveBoard'; layout: Record<string, Placement | null> }
-  /** Development builds only: finish the current focus session right now. */
-  | { type: 'devComplete' };
+  /** The editor's "Guardar": every piece position at once, per scene id. */
+  | { type: 'saveBoard'; layouts: Record<string, Record<string, Placement | null>> };
 
 export interface Message<T = Command> {
   v: 1;

@@ -1,8 +1,8 @@
-import { firstFit, fits, normalizePieces, sceneAt } from './board.js';
+import { DEV_PREFIX, firstFit, fits, normalizePieces, sceneAt, viewOf, withView } from './board.js';
 import { HISTORY_LIMIT, PROFILES } from './config.js';
 import { saveSettings } from './machine.js';
 import { dayKey } from './time.js';
-import type { AppData, Outcome, Piece, ProfileId, SessionRecord, Settings } from './types.js';
+import type { AppData, Outcome, Piece, Placement, ProfileId, SessionRecord, Settings } from './types.js';
 
 /**
  * What travels between devices through the browser's own sync: settings, history and pieces.
@@ -24,12 +24,15 @@ function syncedSettings(s: Settings): SyncedSettings {
   return rest;
 }
 
+/** Pieces that travel: the ones development builds add to have every kind at hand stay on that device. */
+const shared = (pieces: readonly Piece[]) => pieces.filter((p) => !p.id.startsWith(DEV_PREFIX));
+
 export function toSynced(data: AppData): Synced {
   return {
     settings: syncedSettings(data.settings),
     settingsAt: data.stamps.settings,
     history: data.history,
-    pieces: data.pieces,
+    pieces: shared(data.pieces),
     boardAt: data.stamps.board,
   };
 }
@@ -64,7 +67,7 @@ const recordKey = (r: SessionRecord) => `${r.at}|${r.outcome}`;
 export function hasNews(local: AppData, remote: Synced): boolean {
   if (local.stamps.board > remote.boardAt || local.stamps.settings > remote.settingsAt) return true;
   const pieceIds = new Set(remote.pieces.map((p) => p.id));
-  if (local.pieces.some((p) => !pieceIds.has(p.id))) return true;
+  if (shared(local.pieces).some((p) => !pieceIds.has(p.id))) return true;
   const records = new Set(remote.history.map(recordKey));
   return local.history.some((r) => !records.has(recordKey(r)));
 }
@@ -86,14 +89,20 @@ export function merge(local: AppData, remote: Synced): AppData {
 
   const remoteNewer = remote.boardAt > local.stamps.board;
   const [primary, secondary] = remoteNewer ? [remote.pieces, local.pieces] : [local.pieces, remote.pieces];
-  const pieces = normalizePieces(primary);
+  let pieces = normalizePieces(primary);
   const ids = new Set(pieces.map((p) => p.id));
   for (const p of secondary) {
     if (ids.has(p.id)) continue;
     ids.add(p.id);
-    const placed =
-      p.placed && fits(pieces, p.kind, p.placed) ? p.placed : firstFit(pieces, p.kind, p.placed ? Math.max(0, sceneAt(p.placed)) : 0);
-    pieces.push({ ...p, placed });
+    // A piece only the other copy has keeps its spot in each scene where it still fits, or finds a new one there.
+    pieces.push({ ...p, spots: [] });
+    for (const spot of p.spots) {
+      const scene = sceneAt(spot);
+      if (scene < 0 || spot.on !== undefined) continue;
+      const view = viewOf(pieces, scene);
+      const placed = fits(view, p.kind, spot) ? spot : firstFit(view, p.kind, scene);
+      pieces = withView(pieces, scene, [{ id: p.id, kind: p.kind, earnedAt: p.earnedAt, placed }]);
+    }
   }
   pieces.sort((a, b) => a.earnedAt - b.earnedAt || a.id.localeCompare(b.id));
 
@@ -118,37 +127,68 @@ const OUTCOME_OF = invert(OUTCOME_CODE);
 const PROFILE_OF = invert(PROFILE_CODE);
 
 type HistoryRow = [at: number, outcome: string, profile: string, minutes: number];
-type PieceRow =
-  | [id: string, kind: string, earnedAt: number]
-  | [id: string, kind: string, earnedAt: number, on: string, flip: 0 | 1]
-  | [id: string, kind: string, earnedAt: number, x: number, y: number, flip: 0 | 1]
-  | [id: string, kind: string, earnedAt: number, x: number, y: number, flip: 0 | 1, floor: number]
-  | [id: string, kind: string, earnedAt: number, x: number, y: number, flip: 0 | 1, floor: number, scene: string];
+/** A spot as a short row: floor and scene only when not the defaults; on top of another piece: its id first. */
+type SpotRow =
+  | [x: number, y: number, flip: 0 | 1]
+  | [x: number, y: number, flip: 0 | 1, floor: number]
+  | [x: number, y: number, flip: 0 | 1, floor: number, scene: string]
+  | [on: string, flip: 0 | 1]
+  | [on: string, flip: 0 | 1, scene: string];
+type PieceRow = [id: string, kind: string, earnedAt: number, ...spots: SpotRow[]];
 
-/** A piece as a short row: position fields only when placed, floor and scene only when not the defaults. */
-function pieceRow(p: Piece): PieceRow {
-  if (!p.placed) return [p.id, p.kind, p.earnedAt];
-  if (p.placed.on !== undefined) return [p.id, p.kind, p.earnedAt, p.placed.on, p.placed.flip ? 1 : 0];
-  const { x, y, flip, floor = 0, scene } = p.placed;
-  const f = flip ? 1 : 0;
-  if (scene !== undefined) return [p.id, p.kind, p.earnedAt, x, y, f, floor, scene];
-  if (floor) return [p.id, p.kind, p.earnedAt, x, y, f, floor];
-  return [p.id, p.kind, p.earnedAt, x, y, f];
+function spotRow(p: Placement): SpotRow {
+  const f = p.flip ? 1 : 0;
+  if (p.on !== undefined) return p.scene !== undefined ? [p.on, f, p.scene] : [p.on, f];
+  const { x, y, floor = 0, scene } = p;
+  if (scene !== undefined) return [x, y, f, floor, scene];
+  if (floor) return [x, y, f, floor];
+  return [x, y, f];
 }
+
+/** Where a spot's placement order goes in the `z` table: piece id and scene id (empty for the garden). */
+const zKey = (id: string, scene: unknown) => `${id}@${typeof scene === 'string' ? scene : ''}`;
 
 export function encode(s: Synced): string {
   return JSON.stringify({
-    v: 2,
+    v: 3,
     s: s.settings,
     sa: s.settingsAt,
     h: s.history.map(
       (r): HistoryRow => [r.at, OUTCOME_CODE[r.outcome], PROFILE_CODE[r.profile], r.focusedMinutes],
     ),
-    p: s.pieces.map(pieceRow),
-    // Placement order (who is in front at the same depth), only for pieces that have one.
-    z: Object.fromEntries(s.pieces.flatMap((p) => (p.placed?.z ? [[p.id, p.placed.z]] : []))),
+    p: s.pieces.map((p): PieceRow => [p.id, p.kind, p.earnedAt, ...p.spots.map(spotRow)]),
+    // Placement order (who is in front at the same depth), only for spots that have one.
+    z: Object.fromEntries(
+      s.pieces.flatMap((p) => p.spots.flatMap((sp) => (sp.z ? [[zKey(p.id, sp.scene), sp.z]] : []))),
+    ),
     ba: s.boardAt,
   });
+}
+
+/** A spot row back into a placement (unchecked: normalizePieces validates it). */
+function spotOf(row: unknown): Record<string, unknown> | null {
+  if (!Array.isArray(row)) return null;
+  const [a, b, c, d, e] = row as unknown[];
+  if (typeof a === 'string') {
+    const spot: Record<string, unknown> = { x: 0, y: 0, flip: b === 1, on: a };
+    if (c !== undefined) spot.scene = c;
+    return spot;
+  }
+  const spot: Record<string, unknown> = { x: a, y: b, flip: c === 1 };
+  if (row.length >= 4) spot.floor = d;
+  if (row.length >= 5) spot.scene = e;
+  return spot;
+}
+
+/** Version 1 and 2 rows: one spot at most, written inline after the piece fields. */
+function legacyRow(row: unknown[], kittens: boolean): Record<string, unknown> {
+  const [id, kind, earnedAt, x, y, flip, floor, scene] = row;
+  if (typeof x === 'string') return { id, kind, earnedAt, placed: { x: 0, y: 0, flip: y === 1, on: x } };
+  const placed: Record<string, unknown> | null =
+    row.length >= 6 ? { x, y, flip: kittens ? flip === 1 : undefined } : null;
+  if (placed && row.length >= 7) placed.floor = floor;
+  if (placed && row.length >= 8) placed.scene = scene;
+  return { id, kind, earnedAt, placed };
 }
 
 /** Parses what another device wrote. Anything malformed is dropped rather than trusted. */
@@ -159,9 +199,9 @@ export function decode(text: string): Synced | null {
   } catch {
     return null;
   }
-  if (typeof raw !== 'object' || raw === null || (raw.v !== 1 && raw.v !== 2)) return null;
+  if (typeof raw !== 'object' || raw === null || (raw.v !== 1 && raw.v !== 2 && raw.v !== 3)) return null;
   // v1 carried four-block pieces with a rotation: they become kittens and find a spot again.
-  const kittens = raw.v === 2;
+  const kittens = raw.v !== 1;
 
   const history: SessionRecord[] = [];
   for (const row of Array.isArray(raw.h) ? (raw.h as unknown[]) : []) {
@@ -173,21 +213,23 @@ export function decode(text: string): Synced | null {
     history.push({ at, day: dayKey(at), outcome, profile, focusedMinutes: m });
   }
 
+  const order = typeof raw.z === 'object' && raw.z !== null ? (raw.z as Record<string, unknown>) : {};
   const pieceObjects = (Array.isArray(raw.p) ? (raw.p as unknown[]) : []).map((row) => {
     if (!Array.isArray(row)) return null;
-    const [id, kind, earnedAt, x, y, flip, floor, scene] = row as unknown[];
-    if (typeof x === 'string') return { id, kind, earnedAt, placed: { x: 0, y: 0, flip: y === 1, on: x } };
-    const placed: Record<string, unknown> | null =
-      row.length >= 6 ? { x, y, flip: kittens ? flip === 1 : undefined } : null;
-    if (placed && row.length >= 7) placed.floor = floor;
-    if (placed && row.length >= 8) placed.scene = scene;
-    return { id, kind, earnedAt, placed };
+    if (raw.v !== 3) {
+      const piece = legacyRow(row as unknown[], kittens);
+      const z = typeof piece.id === 'string' ? order[piece.id] : undefined;
+      if (piece.placed && typeof z === 'number') (piece.placed as Record<string, unknown>).z = z;
+      return piece;
+    }
+    const [id, kind, earnedAt, ...rows] = row as unknown[];
+    const spots = rows.map(spotOf).filter((spot): spot is Record<string, unknown> => spot !== null);
+    for (const spot of spots) {
+      const z = order[zKey(String(id), spot.scene)];
+      if (typeof z === 'number') spot.z = z;
+    }
+    return { id, kind, earnedAt, spots };
   });
-  const order = typeof raw.z === 'object' && raw.z !== null ? (raw.z as Record<string, unknown>) : {};
-  for (const piece of pieceObjects) {
-    const z = piece && typeof piece.id === 'string' ? order[piece.id] : undefined;
-    if (piece?.placed && typeof z === 'number') (piece.placed as Record<string, unknown>).z = z;
-  }
 
   const settings: Partial<SyncedSettings> =
     typeof raw.s === 'object' && raw.s !== null ? { ...(raw.s as Partial<SyncedSettings>) } : {};

@@ -7,7 +7,6 @@ import { mountScene } from '../shared/board.js';
 import {
   bindActions,
   clockText,
-  devButton,
   DONATE_URL,
   focusMinutes,
   leavingPanel,
@@ -102,7 +101,6 @@ function shell(s: Snapshot): string {
     : '';
   return `<header><span class="status"><span class="dot"></span>${S.state[state.kind]}</span>${unlockNote(s)}</header>
     <main>${viewFor(s)}</main>
-    ${devButton()}
     <footer>
       <span class="brand">${S.appName}</span>
       <span>${donate}<button class="ghost small" data-action="options" aria-label="${S.settings}">⚙</button></span>

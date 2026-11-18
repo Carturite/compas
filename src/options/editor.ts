@@ -12,10 +12,12 @@ import {
   sceneOfPiece,
   shapeSize,
   unplacePiece,
+  viewOf,
+  withView,
 } from '../core/board.js';
 import { castName, sceneData } from '../core/scenes.js';
 import { isDevBuild } from '../platform/env.js';
-import type { Piece, Placement } from '../core/types.js';
+import type { Piece, Placed, Placement } from '../core/types.js';
 import { send } from '../platform/messaging.js';
 import { cellAtPicture, mountBackground, pieceThumb } from '../shared/board.js';
 import type { Snapshot } from '../shared/snapshot.js';
@@ -24,7 +26,7 @@ import { S } from '../shared/strings.js';
 /**
  * Edit mode for the scenes. Only reachable from settings: everywhere else the chosen scene
  * is a soft background. When more than one scene is open, tabs switch between them (the album).
- * The tray is shared: any character can be placed in any scene.
+ * Every piece can stand once in each scene: the tray shows the pieces not placed yet in the scene being edited.
  * Moves are a local draft; only "Guardar" sends the whole board to the background,
  * which validates it, stores it and shares it with other devices.
  */
@@ -44,8 +46,9 @@ const toTrayBtn = $<HTMLButtonElement>('to-tray');
 const saveBtn = $<HTMLButtonElement>('save-board');
 const cancelBtn = $<HTMLButtonElement>('cancel-board');
 
-/** Working copy while editing. */
-let pieces: Piece[] = [];
+/** Working copy while editing: every scene, and the scene being edited as the board sees it. */
+let all: Piece[] = [];
+let pieces: Placed[] = [];
 let dirty = false;
 let editing = false;
 let selectedId: string | null = null;
@@ -55,15 +58,15 @@ let scene = 0;
 let cursor: CellPos = { floor: 0, x: 0, y: 0 };
 let pointerInside = false;
 /** A character with room on top, under the pointer while holding another one. */
-let hoverBase: Piece | null = null;
+let hoverBase: Placed | null = null;
 let keyboard = false;
 let message = '';
 let onSnapshot: (s: Snapshot) => void = () => undefined;
 let onClose: () => void = () => undefined;
-let savedPieces: () => Piece[] = () => pieces;
+let savedPieces: () => Piece[] = () => all;
 
 const selected = () => pieces.find((p) => p.id === selectedId) ?? null;
-const inScene = (p: Piece) => p.placed !== null && sceneOfPiece(pieces, p) === scene;
+const inScene = (p: Placed) => p.placed !== null && sceneOfPiece(pieces, p) === scene;
 
 function centerOf(floor: number): CellPos {
   const { cols, rows } = floorsOf(scene)[floor]!;
@@ -72,7 +75,7 @@ function centerOf(floor: number): CellPos {
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
 /** The selected kitten, roughly centered on the cell under the pointer, kept inside its floor. */
-function placementAt(cell: CellPos, piece: Piece): Placement {
+function placementAt(cell: CellPos, piece: Placed): Placement {
   const { w, h } = shapeSize(piece.kind);
   const { cols, rows } = floorsOf(scene)[cell.floor]!;
   return placementOf(
@@ -84,7 +87,7 @@ function placementAt(cell: CellPos, piece: Piece): Placement {
   );
 }
 
-function pieceAt(cell: CellPos): Piece | null {
+function pieceAt(cell: CellPos): Placed | null {
   return (
     pieces.find(
       (p) =>
@@ -98,7 +101,7 @@ function pieceAt(cell: CellPos): Piece | null {
 }
 
 /** The kitten drawn under the pointer: its head can stick out over cells further back. */
-function pieceFromEvent(event: MouseEvent): Piece | null {
+function pieceFromEvent(event: MouseEvent): Placed | null {
   const id = (event.target as Element).closest?.('[data-piece]')?.getAttribute('data-piece');
   return pieces.find((p) => p.id === id) ?? null;
 }
@@ -135,7 +138,7 @@ function draw(): void {
 }
 
 function drawTabs(): void {
-  const open = openScenes(pieces, isDevBuild());
+  const open = openScenes(all, isDevBuild());
   tabs.hidden = open.length < 2;
   tabs.innerHTML = open
     .map(
@@ -158,7 +161,7 @@ function drawTray(): void {
     : `<span class="small muted">${S.pieces.trayEmpty}</span>`;
 }
 
-function select(piece: Piece | null): void {
+function select(piece: Placed | null): void {
   selectedId = piece?.id ?? null;
   flip = piece?.placed?.flip ?? false;
   message = '';
@@ -166,7 +169,7 @@ function select(piece: Piece | null): void {
   draw();
 }
 
-async function act(cell: CellPos, drawn: Piece | null = null): Promise<void> {
+async function act(cell: CellPos, drawn: Placed | null = null): Promise<void> {
   const sel = selected();
   const hit = (sel ? null : drawn) ?? pieceAt(cell);
   if (!sel || (hit && hit.id !== sel.id && !fits(pieces, sel.kind, placementAt(cell, sel), sel.id))) {
@@ -208,7 +211,11 @@ function sendToTray(): void {
 
 async function save(): Promise<void> {
   saveBtn.disabled = true;
-  const snap = await send({ type: 'saveBoard', layout: layoutOf(pieces) });
+  all = withView(all, scene, pieces);
+  const layouts = Object.fromEntries(
+    openScenes(all, isDevBuild()).map((s) => [sceneData(s).id, layoutOf(viewOf(all, s))]),
+  );
+  const snap = await send({ type: 'saveBoard', layouts });
   saveBtn.disabled = false;
   onSnapshot(snap);
   close();
@@ -243,7 +250,7 @@ host.addEventListener('click', (event) => {
 });
 
 /** Puts the piece in hand on top of a character with room for it (a table, a drum, a hat). */
-function putOnTop(sel: Piece, base: Piece): void {
+function putOnTop(sel: Placed, base: Placed): void {
   const placement: Placement = { x: 0, y: 0, flip, on: base.id };
   if (!fits(pieces, sel.kind, placement, sel.id)) {
     message = S.pieces.noFit;
@@ -311,7 +318,9 @@ tabs.addEventListener('click', (event) => {
 
 /** Switches the album to another scene. Moves made in the draft are kept. */
 function showScene(next: number): void {
+  all = withView(all, scene, pieces);
   scene = next;
+  pieces = viewOf(all, scene);
   selectedId = null;
   message = '';
   cursor = centerOf(0);
@@ -357,17 +366,24 @@ export function setupEditor(handlers: {
 
 export function updateEditor(next: Piece[]): void {
   if (!editing) {
-    pieces = next;
+    all = next;
     return;
   }
   // A piece earned meanwhile (another tab or device) joins the draft without undoing its moves.
-  const known = new Set(pieces.map((p) => p.id));
+  all = withView(all, scene, pieces);
+  const known = new Set(all.map((p) => p.id));
   for (const p of next) {
     if (known.has(p.id)) continue;
-    const placed =
-      p.placed && fits(pieces, p.kind, p.placed) ? p.placed : firstFit(pieces, p.kind, scene);
-    pieces = [...pieces, { ...p, placed }];
+    all = [...all, { ...p, spots: [] }];
+    for (const s of openScenes(all, isDevBuild())) {
+      const view = viewOf(all, s);
+      const wanted = viewOf([p], s)[0]!.placed;
+      if (!wanted) continue;
+      const placed = fits(view, p.kind, wanted) ? wanted : firstFit(view, p.kind, s);
+      all = withView(all, s, [{ id: p.id, kind: p.kind, earnedAt: p.earnedAt, placed }]);
+    }
   }
+  pieces = viewOf(all, scene);
   if (selectedId && !selected()) selectedId = null;
   drawTabs();
   drawTray();
@@ -377,7 +393,9 @@ export function updateEditor(next: Piece[]): void {
 /** Opens edit mode on a scene (the one in the background). */
 export function open(current: Piece[], startScene: number): void {
   editing = true;
-  pieces = current;
+  all = current;
+  scene = startScene;
+  pieces = viewOf(all, scene);
   selectedId = null;
   message = '';
   dirty = false;
@@ -395,7 +413,8 @@ export function open(current: Piece[], startScene: number): void {
 export function close(saved: Piece[] = savedPieces()): void {
   editing = false;
   dirty = false;
-  pieces = saved;
+  all = saved;
+  pieces = viewOf(all, scene);
   selectedId = null;
   keyboard = false;
   document.body.classList.remove('editing');

@@ -100,7 +100,7 @@ export const S = {
     title: 'Tus escenas',
     /** How many different characters of all casts you have. */
     summary: (have: number, total: number, inTray: number) =>
-      `Tienes ${have} de ${total} personajes${inTray > 0 ? ` · ${inTray} en la bandeja` : ''}.`,
+      `Tienes ${have} de ${total} piezas${inTray > 0 ? ` · ${inTray} por poner en esta escena` : ''}.`,
     next: (left: number) => `Te ${left === 1 ? 'falta 1 personaje' : `faltan ${left} personajes`} para abrir un fondo nuevo.`,
     /** Small corner note in the popup. */
     nextShort: (left: number) => `Fondo nuevo en ${left}`,
@@ -120,10 +120,6 @@ export const S = {
     noFit: 'Ahí no cabe. Prueba otro lugar.',
     boardLabel:
       'Escena. Flechas para moverte, F para cambiar de lugar (suelo, tarimas, bancos, trapecios), Enter para tomar o dejar un personaje, R para voltearlo, Supr para mandarlo a la bandeja, Esc para soltar.',
-  },
-
-  dev: {
-    complete: 'Completar sesión (dev)',
   },
 
   notify: {

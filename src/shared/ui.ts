@@ -1,7 +1,6 @@
 import { PROFILES } from '../core/config.js';
 import { formatClock } from '../core/time.js';
 import type { State } from '../core/types.js';
-import { isDevBuild } from '../platform/env.js';
 import { send } from '../platform/messaging.js';
 import type { Snapshot } from './snapshot.js';
 import { S } from './strings.js';
@@ -96,9 +95,6 @@ export function bindActions(
           settings: { profile: el.dataset.value as Snapshot['data']['settings']['profile'] },
         });
         break;
-      case 'devComplete':
-        snap = await send({ type: 'devComplete' });
-        break;
       case 'options':
         await chrome.runtime.openOptionsPage();
         break;
@@ -119,13 +115,6 @@ export function tickTimers(root: HTMLElement, state: State): void {
     const done = Math.min(1, Math.max(0, 1 - remaining(state) / (state.endsAt - state.startedAt)));
     fill.setAttribute('stroke-dashoffset', String(c * done));
   }
-}
-
-/** Development builds only: a quiet button to finish a session without waiting. */
-export function devButton(): string {
-  return isDevBuild()
-    ? `<button class="ghost small dev" data-action="devComplete">${S.dev.complete}</button>`
-    : '';
 }
 
 /** Ticks every second and refetches when a timer runs out or storage changes. */

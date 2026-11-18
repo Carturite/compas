@@ -29,9 +29,9 @@ las redes se les comen el día. No hace falta saber nada técnico.
 
 Detrás de cada pantalla hay una escena ilustrada (un jardín, un circo…), suave y difuminada:
 acompaña, pero lo importante es la información de adelante.
-Cada sesión completa regala un personaje (gatitos con ropa de época, pájaros de circo y algunos objetos),
-primero los que aún no tienes. Se acomoda solo, en perspectiva: los de adelante se ven más grandes y tapan a los
-de atrás; también pueden subirse a bancos, tarimas o trapecios. Los personajes se mezclan como quieras entre escenas.
+Cada sesión completa regala una pieza al azar: un objeto, un personaje o un personaje que parpadea (gatitos con ropa
+de época, pájaros de circo, músicos del teatro y su utilería), y puede repetirse. Se acomoda sola, en perspectiva: los de adelante se ven más grandes y tapan a los
+de atrás; también pueden subirse a bancos, tarimas o trapecios. Cada pieza se puede poner una vez en cada escena.
 Los fondos se van abriendo con los personajes que ganas (el circo, con 15); una esquina del popup avisa cuántos faltan.
 En ajustes eliges el fondo y, en "Acomodar personajes", los mueves y volteas, con pestañas para cada escena.
 

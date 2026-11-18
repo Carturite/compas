@@ -1,8 +1,7 @@
-import { applyBoard } from '../core/board.js';
+import { applyBoards, withCatalog } from '../core/board.js';
 import {
   advance,
   cancel,
-  completeNow,
   endBreak,
   isBlocking,
   postpone,
@@ -51,10 +50,7 @@ function applyCommand(data: AppData, cmd: Command, now: number): AppData {
     case 'saveSettings':
       return saveSettings(data, cmd.settings);
     case 'saveBoard':
-      return { ...data, pieces: applyBoard(data.pieces, cmd.layout) };
-    case 'devComplete':
-      // Never available in a store build, even if a page asks for it.
-      return isDevBuild() ? completeNow(data, now) : data;
+      return { ...data, pieces: applyBoards(data.pieces, cmd.layouts) };
     case 'getSnapshot':
       return data;
   }
@@ -63,7 +59,9 @@ function applyCommand(data: AppData, cmd: Command, now: number): AppData {
 /** Loads, advances time, applies an optional command, persists and syncs the browser. */
 async function process(cmd?: Command, forceBlockingSync = false): Promise<Snapshot> {
   const now = Date.now();
-  const before = await loadData();
+  const loaded = await loadData();
+  // Development builds have every piece at hand (those extra pieces never travel to other devices).
+  const before = isDevBuild() ? { ...loaded, pieces: withCatalog(loaded.pieces) } : loaded;
   const advanced = advance(before, now);
   const local = touch(before, cmd ? applyCommand(advanced, cmd, now) : advanced, now);
   const after = await syncWithOtherDevices(local, now);

@@ -158,6 +158,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .board .spot { fill: rgb(255 255 255 / 0.28); stroke: #fff; stroke-width: 3; }
 .board .spot.no-fit { fill: none; stroke: #fff; stroke-dasharray: 12 10; }
 .board .cursor { fill: none; stroke: #fff; stroke-width: 5; }
+/* Blinking: the closed eyes show for a blink at the end of each cycle; the page sets each one's pace. */
+.board .blink { opacity: 0; pointer-events: none; animation: blink 45s step-end infinite; }
+.board .blink.twice { animation-name: blink-twice; }
+@keyframes blink { 0% { opacity: 0; } 99.65% { opacity: 1; } }
+@keyframes blink-twice { 0% { opacity: 0; } 99.2% { opacity: 1; } 99.45% { opacity: 0; } 99.7% { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
