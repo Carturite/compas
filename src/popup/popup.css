@@ -1,0 +1,47 @@
+body { width: 300px; }
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  padding: 14px 16px 8px;
+  gap: 16px;
+}
+
+main { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+
+.start { padding: 16px 22px; font-size: 16px; }
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 -8px;
+}
+
+.brand {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  opacity: 0.7;
+  padding-left: 8px;
+}
+
+footer a { text-decoration: none; }
+
+.dev { align-self: center; font-size: 11px; opacity: 0.7; border: 1px dashed var(--line); }
+
+/* Small window: a bit softer so the clock always reads first. */
+.board-bg { opacity: 0.24; }
+
+/* Corner note: characters left until the next background opens. */
+header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.unlock {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--surface);
+}
+.opened { color: var(--accent); font-weight: 600; }

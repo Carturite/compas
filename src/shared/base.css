@@ -1,0 +1,164 @@
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --text: #23262b;
+  --muted: #6b7079;
+  --line: #e4e2dd;
+  --focus: #2f8f83;
+  --break: #b9832a;
+  --waiting: #6d66bd;
+  --idle: #8a8f98;
+  --accent: var(--focus);
+  /* Board pieces: soft tones, never alarm red. */
+  --radius: 14px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191c;
+    --surface: #202327;
+    --text: #e9e7e2;
+    --muted: #9aa0a8;
+    --line: #2e3237;
+    --focus: #5cc2b4;
+    --break: #e2b45e;
+    --waiting: #a49ef0;
+    --idle: #8a8f98;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+[data-state='focus'] { --accent: var(--focus); }
+[data-state='break'] { --accent: var(--break); }
+[data-state='waiting'] { --accent: var(--waiting); }
+[data-state='idle'] { --accent: var(--focus); }
+
+h1, h2, p { margin: 0; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  border-radius: 999px;
+  transition: transform 150ms var(--ease), background 150ms var(--ease), opacity 150ms var(--ease);
+}
+button:active { transform: scale(0.97); }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+  padding: 12px 22px;
+  font-weight: 600;
+  font-size: 15px;
+}
+@media (prefers-color-scheme: dark) { .primary { color: #10201e; } }
+
+.ghost {
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 12px;
+}
+.ghost:hover { color: var(--text); }
+
+.chip {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+}
+.chip:hover { border-color: var(--accent); }
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+[data-state='idle'] .dot { background: var(--idle); }
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 44px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 300ms var(--ease); }
+
+.ring { display: block; margin: 0 auto; }
+.ring circle { fill: none; stroke-width: 6; }
+.ring .track { stroke: var(--line); }
+.ring .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.center { text-align: center; }
+
+.fade { animation: fade 180ms var(--ease); }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- Reward garden, always behind the content ---- */
+.board-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: #6f9a4a;
+  /* In the background it only accompanies: the information stays in front. */
+  filter: blur(2.5px);
+  opacity: 0.32;
+  transition: filter 200ms var(--ease), opacity 200ms var(--ease);
+}
+@media (prefers-color-scheme: dark) { .board-bg { opacity: 0.22; } }
+.board-bg .board { display: block; width: 100%; height: 100%; }
+/* Zero specificity, so pages can still position their own layers. */
+:where(body > :not(.board-bg)) { position: relative; z-index: 1; }
+
+.board image { image-rendering: pixelated; }
+/* The grid only shows while arranging kittens. */
+.board .cell { fill: none; stroke: none; }
+.board .scene, .board .prop { pointer-events: none; }
+.board .lifted { opacity: 0.3; }
+.board .ghost { opacity: 0.8; }
+.board .ghost.no-fit { opacity: 0.35; }
+.board .spot { fill: rgb(255 255 255 / 0.28); stroke: #fff; stroke-width: 3; }
+.board .spot.no-fit { fill: none; stroke: #fff; stroke-dasharray: 12 10; }
+.board .cursor { fill: none; stroke: #fff; stroke-width: 5; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
