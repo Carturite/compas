@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.test-build/
+*.zip
+dist-firefox/
+
+# Previews from scripts/escenas.py --check
+img/**/_*.png
+img/**/_recortes/

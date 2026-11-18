@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "compaz",
+  "short_name": "compaz",
+  "description": "Concéntrate un rato y descansa sin culpa. Bloquea distracciones durante tus sesiones.",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAunVMjxVisNwW5UyiPVyEpX5ePl0eMj9zC5/1rLcwoYO/XFqhVQwIwTfSnsVGjWijPgQ8YREN/uAwUPBNvgXcT1VnpfBxvAfRJAev2NIvhMw9TMHCKLMhwUgqlFkvTJx2QNT36mEDgj/rVJlc10Maaa3D265HhxRQnJiYhJuHiRVHd7reQXnjtLzuwLUUEA8GVEp8CQDAbnDfUcmNzbn4voifcKc4lciMp9NORamhGJ+1Uh/rX4OmWddOtmnN0KkIUKUfJwg9OvjTHqZJ4qGQAPc8mYFuvNdEhMKRavFjUd1dNVVGVTubLCFe5YdwEEcrCvdwIpW8GLYm/wkqYRcd8wIDAQAB",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/idle-16.png",
+    "32": "icons/idle-32.png",
+    "48": "icons/idle-48.png",
+    "128": "icons/idle-128.png"
+  },
+  "action": {
+    "default_title": "compaz",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/idle-16.png",
+      "32": "icons/idle-32.png",
+      "48": "icons/idle-48.png",
+      "128": "icons/idle-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "options_page": "options/options.html",
+  "permissions": [
+    "storage",
+    "alarms",
+    "declarativeNetRequestWithHostAccess",
+    "notifications"
+  ],
+  "host_permissions": [
+    "*://tiktok.com/*",
+    "*://*.tiktok.com/*",
+    "*://instagram.com/*",
+    "*://*.instagram.com/*",
+    "*://youtube.com/*",
+    "*://*.youtube.com/*",
+    "*://twitch.tv/*",
+    "*://*.twitch.tv/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "blocked/*",
+        "shared/*",
+        "core/*",
+        "platform/*",
+        "icons/*",
+        "escenas/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
