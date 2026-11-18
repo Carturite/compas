@@ -4,9 +4,15 @@ Extensión de navegador minimalista para concentrarte un rato y descansar sin cu
 
 Lee `docs/` antes de contribuir.
 
-## Probar en local (sin instalar nada)
+## Probar en local
 
-`dist/` ya viene compilada.
+Funciona igual en Windows, macOS y Linux. Necesitas [Node.js](https://nodejs.org) 22 o superior.
+`dist/` no viene en el repositorio: se compila una vez al clonar.
+
+```bash
+npm install
+npm run build
+```
 
 1. Abre `chrome://extensions` (o `edge://extensions`).
 2. Activa **Modo de desarrollador**.
@@ -35,7 +41,8 @@ npm run typecheck
 ```
 
 Escenas: cada una vive en `img/escenas/<id>/` (fondo, hojas de personajes y `escena.json`).
-Para agregar o ajustar una: `python scripts/escenas.py --calibrar` (necesita `python -m pip install pillow`)
+Para agregar o ajustar una: `python scripts/escenas.py --calibrar` (necesita `python -m pip install pillow`;
+en macOS es `python3`, y si pip se niega a instalar, crea antes un entorno: `python3 -m venv .venv && source .venv/bin/activate`)
 abre el calibrador en el navegador; "Guardar y regenerar" deja todo listo. Cómo pedir las imágenes: `docs/05-escenas.md`.
 
 ## Probar rápido sin esperar 25 minutos

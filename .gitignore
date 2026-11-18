@@ -7,3 +7,4 @@ dist-firefox/
 # Previews from scripts/escenas.py --check
 img/**/_*.png
 img/**/_recortes/
+.venv/
