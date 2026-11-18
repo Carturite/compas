@@ -33,7 +33,7 @@ export interface SceneData {
   height: number;
   floors: readonly FloorData[];
   props: readonly { name: string; x: number; y: number; w: number; h: number; base: number }[];
-  /** w: floor cells it takes (1 or 2, one row deep). sw, sh: how big it looks, in cell widths. */
+  /** w: floor cells it takes (1 to 3, one row deep). sw, sh: how big it looks, in cell widths. */
   cast: readonly {
     id: string;
     w: number;
@@ -44,6 +44,15 @@ export interface SceneData {
     top?: number;
     /** Hangs from its feet on hanging floors. */
     hang?: boolean;
+    /** A thing (a drum, a rug), not a character: rewards are drawn by kind. */
+    object?: boolean;
+    /**
+     * Takes no room: others can share its cells. 'back' (a rug, an arch) is drawn behind whoever shares its row,
+     * 'front' (a flower box) in front of them.
+     */
+    layer?: 'front' | 'back';
+    /** Blinks now and then: where its closed-eyes piece goes (x, y, w, h as fractions of its drawing). */
+    blink?: readonly number[];
   }[];
 }
 
@@ -52,7 +61,8 @@ export { SCENES };
 export type CastId = (typeof SCENES)[number]['cast'][number]['id'];
 
 const ALL: readonly SceneData[] = SCENES;
-const INFO = new Map<string, { scene: number; w: number; sw: number; sh: number; name: string; top?: number; hang?: boolean }>();
+type CastInfo = SceneData['cast'][number] & { scene: number };
+const INFO = new Map<string, CastInfo>();
 ALL.forEach((s, scene) => s.cast.forEach((c) => INFO.set(c.id, { scene, ...c })));
 
 export const sceneData = (scene: number): SceneData => ALL[scene]!;
@@ -69,7 +79,7 @@ export function homeOf(kind: CastId): number {
   return INFO.get(kind)!.scene;
 }
 
-/** Floor cells a character takes: 1 or 2 wide, always one row deep. */
+/** Floor cells a character takes: 1 to 3 wide, always one row deep. */
 export function footprint(kind: CastId): { w: number; h: number } {
   return { w: INFO.get(kind)!.w, h: 1 };
 }
@@ -87,6 +97,21 @@ export function topOf(kind: CastId): number | undefined {
 
 export function hangs(kind: CastId): boolean {
   return INFO.get(kind)!.hang === true;
+}
+
+/** A thing (a drum, a rug) rather than a character. */
+export function isObject(kind: CastId): boolean {
+  return INFO.get(kind)!.object === true;
+}
+
+/** Whether it shares its cells, drawn behind ('back') or in front ('front') of whoever stands there. */
+export function layerOf(kind: CastId): 'front' | 'back' | undefined {
+  return INFO.get(kind)!.layer;
+}
+
+/** Where its closed-eyes piece goes on its drawing (fractions), for characters that blink. */
+export function blinkOf(kind: CastId): readonly number[] | undefined {
+  return INFO.get(kind)!.blink;
 }
 
 export function castName(kind: CastId): string {
