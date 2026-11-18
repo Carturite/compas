@@ -1,0 +1,47 @@
+# Escenas: cómo pedir y preparar las imágenes
+
+Guía para sumar fondos y personajes que queden bien en perspectiva. El cómo está construido
+vive en `03-solucion.md` ("Escenas y personajes").
+
+## Qué entregar
+
+Una carpeta por escena en `img/escenas/<nombre>/`:
+
+- `fondo.png`: la ilustración.
+- Una o más hojas de personajes en PNG transparente (cualquier nombre, por ejemplo `pajaritos1.png`).
+
+Luego `python scripts/escenas.py --calibrar` abre el calibrador y el resto se hace con clics.
+
+## Fondos
+
+- 16:9, de al menos 1672 × 941.
+- Una sola perspectiva: cámara un poco elevada, mirando de frente.
+- Una zona grande de suelo despejada al centro.
+- Superficies planas y claras donde pueda pararse alguien (tarimas, bancos, repisas, trapecios), sin cosas encima.
+- Mismo estilo pixel-art y luz que sus personajes.
+
+## Hojas de personajes
+
+- Fondo transparente real (PNG con alfa), no un cuadriculado gris dibujado.
+- Cuadrícula de 4 × 4 casillas iguales, un personaje por casilla, con espacio de sobra entre ellos: nunca se tocan.
+- Todos a la misma escala dentro de la hoja, de cuerpo entero, sin cortar.
+- Apoyados en el borde de abajo de su casilla, como parados en el suelo.
+- Mirando hacia la derecha (la extensión los voltea).
+- Sin sombra en el suelo. Siluetas claras que se lean en chico.
+
+### Prompt de ejemplo
+
+> Hoja de personajes pixel-art, fondo transparente real (PNG con alfa). Cuadrícula de 4 × 4 casillas iguales,
+> un personaje por casilla, separados con margen amplio, sin tocarse. Todos a la misma escala, cuerpo completo,
+> apoyados en el borde inferior de su casilla, mirando a la derecha, sin sombra en el suelo.
+> Estilo y luz iguales a [describe el fondo]. Personajes: [lista].
+
+## En el calibrador
+
+1. **Escena:** nombre, orden, con cuántos personajes ganados se abre y, por hoja, la `celda` (cuántos píxeles de la hoja mide un cuadrito; más grande = personajes más chicos).
+2. **Pisos:** "+ Piso nuevo" y clic en las 4 esquinas (fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda).
+   El primero es el suelo principal. Ajusta columnas y filas; "Bloquear" marca celdas ocupadas por el decorado.
+3. **Objetos:** contorno de lo que debe tapar a los personajes de atrás (bancos, arbustos del frente) y su línea de base.
+   Un piso que está encima de un objeto se marca con "objeto" para que quien se sube se dibuje sobre él.
+4. **Personajes:** marca "usar", ponle nombre y ancho (1 o 2 cuadritos). "Probar" lo muestra sobre los pisos con su tamaño real.
+5. **Guardar y regenerar:** escribe `escena.json`, recorta y achica todo y regenera los datos. Recarga la extensión para verlo.
