@@ -39,9 +39,14 @@ Luego `python scripts/escenas.py --calibrar` abre el calibrador y el resto se ha
 ## En el calibrador
 
 1. **Escena:** nombre, orden, con cuántos personajes ganados se abre y, por hoja, la `celda` (cuántos píxeles de la hoja mide un cuadrito; más grande = personajes más chicos).
-2. **Pisos:** "+ Piso nuevo" y clic en las 4 esquinas (fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda).
+2. **Pisos:** "+ Punto" y un clic para un lugar de 1 cuadrito (gancho, nudo, barra; marca "colgar" si algo puede colgar de ahí).
+   Arrastra su línea punteada hasta donde su objeto toca el suelo: así toma el tamaño de la malla a esa profundidad.
+   Si su objeto se apoya en otro piso (una cuerda sobre una plataforma), elige ese piso y toma su mismo tamaño.
+   "+ Piso nuevo" y clic en las 4 esquinas (fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda).
    El primero es el suelo principal. Ajusta columnas y filas; "Bloquear" marca celdas ocupadas por el decorado.
 3. **Objetos:** contorno de lo que debe tapar a los personajes de atrás (bancos, arbustos del frente) y su línea de base.
    Un piso que está encima de un objeto se marca con "objeto" para que quien se sube se dibuje sobre él.
-4. **Personajes:** marca "usar", ponle nombre y ancho (1 o 2 cuadritos). "Probar" lo muestra sobre los pisos con su tamaño real.
+4. **Personajes:** marca "usar", ponle nombre y ancho (1 o 2 cuadritos). "encima" (0 = borde de arriba de su dibujo)
+   si otro puede pararse sobre él; "cuelga" si cuelga de sus patitas en los lugares para colgar; "escala" si en la hoja
+   quedó más grande o más chico que los demás (con "Probar" lo comparas). "Probar" lo muestra sobre los pisos con su tamaño real.
 5. **Guardar y regenerar:** escribe `escena.json`, recorta y achica todo y regenera los datos. Recarga la extensión para verlo.

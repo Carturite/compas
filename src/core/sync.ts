@@ -120,6 +120,7 @@ const PROFILE_OF = invert(PROFILE_CODE);
 type HistoryRow = [at: number, outcome: string, profile: string, minutes: number];
 type PieceRow =
   | [id: string, kind: string, earnedAt: number]
+  | [id: string, kind: string, earnedAt: number, on: string, flip: 0 | 1]
   | [id: string, kind: string, earnedAt: number, x: number, y: number, flip: 0 | 1]
   | [id: string, kind: string, earnedAt: number, x: number, y: number, flip: 0 | 1, floor: number]
   | [id: string, kind: string, earnedAt: number, x: number, y: number, flip: 0 | 1, floor: number, scene: string];
@@ -127,6 +128,7 @@ type PieceRow =
 /** A piece as a short row: position fields only when placed, floor and scene only when not the defaults. */
 function pieceRow(p: Piece): PieceRow {
   if (!p.placed) return [p.id, p.kind, p.earnedAt];
+  if (p.placed.on !== undefined) return [p.id, p.kind, p.earnedAt, p.placed.on, p.placed.flip ? 1 : 0];
   const { x, y, flip, floor = 0, scene } = p.placed;
   const f = flip ? 1 : 0;
   if (scene !== undefined) return [p.id, p.kind, p.earnedAt, x, y, f, floor, scene];
@@ -143,13 +145,15 @@ export function encode(s: Synced): string {
       (r): HistoryRow => [r.at, OUTCOME_CODE[r.outcome], PROFILE_CODE[r.profile], r.focusedMinutes],
     ),
     p: s.pieces.map(pieceRow),
+    // Placement order (who is in front at the same depth), only for pieces that have one.
+    z: Object.fromEntries(s.pieces.flatMap((p) => (p.placed?.z ? [[p.id, p.placed.z]] : []))),
     ba: s.boardAt,
   });
 }
 
 /** Parses what another device wrote. Anything malformed is dropped rather than trusted. */
 export function decode(text: string): Synced | null {
-  let raw: { v?: unknown; s?: unknown; sa?: unknown; h?: unknown; p?: unknown; ba?: unknown };
+  let raw: { v?: unknown; s?: unknown; sa?: unknown; h?: unknown; p?: unknown; ba?: unknown; z?: unknown };
   try {
     raw = JSON.parse(text);
   } catch {
@@ -172,12 +176,18 @@ export function decode(text: string): Synced | null {
   const pieceObjects = (Array.isArray(raw.p) ? (raw.p as unknown[]) : []).map((row) => {
     if (!Array.isArray(row)) return null;
     const [id, kind, earnedAt, x, y, flip, floor, scene] = row as unknown[];
+    if (typeof x === 'string') return { id, kind, earnedAt, placed: { x: 0, y: 0, flip: y === 1, on: x } };
     const placed: Record<string, unknown> | null =
       row.length >= 6 ? { x, y, flip: kittens ? flip === 1 : undefined } : null;
     if (placed && row.length >= 7) placed.floor = floor;
     if (placed && row.length >= 8) placed.scene = scene;
     return { id, kind, earnedAt, placed };
   });
+  const order = typeof raw.z === 'object' && raw.z !== null ? (raw.z as Record<string, unknown>) : {};
+  for (const piece of pieceObjects) {
+    const z = piece && typeof piece.id === 'string' ? order[piece.id] : undefined;
+    if (piece?.placed && typeof z === 'number') (piece.placed as Record<string, unknown>).z = z;
+  }
 
   const settings: Partial<SyncedSettings> =
     typeof raw.s === 'object' && raw.s !== null ? { ...(raw.s as Partial<SyncedSettings>) } : {};

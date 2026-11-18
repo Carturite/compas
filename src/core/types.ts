@@ -54,6 +54,10 @@ export interface Placement {
   floor?: number;
   /** Scene id (core/scenes.ts); absent means the garden, where everything lived before scenes. */
   scene?: string;
+  /** Standing on top of another piece (its id) that has room on top: then x, y, floor and scene follow that piece. */
+  on?: string;
+  /** Placement order: higher = placed later. Among pieces at the same depth, the last one placed is drawn in front. */
+  z?: number;
 }
 
 /** One kitten earned by completing a focus session. `placed: null` = waiting in the tray. */

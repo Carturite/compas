@@ -109,7 +109,7 @@ export const S = {
     none: 'Cada sesión completa te regala un personaje para la escena de fondo.',
     edit: 'Acomodar personajes',
     hint: 'Elige un personaje de la bandeja o de la escena.',
-    hintSelected: 'Toca dónde ponerlo. R para voltearlo, Esc para soltar.',
+    hintSelected: 'Toca dónde ponerlo (también sobre una mesa, un tambor o un sombrero). R para voltearlo, Esc para soltar.',
     rotate: 'Voltear',
     toTray: 'A la bandeja',
     save: 'Guardar',

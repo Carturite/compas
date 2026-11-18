@@ -4,11 +4,12 @@ import {
   fits,
   floorOf,
   floorsOf,
+  holds,
   layoutOf,
   openScenes,
   placementOf,
   placePiece,
-  sceneAt,
+  sceneOfPiece,
   shapeSize,
   unplacePiece,
 } from '../core/board.js';
@@ -53,6 +54,8 @@ let flip = false;
 let scene = 0;
 let cursor: CellPos = { floor: 0, x: 0, y: 0 };
 let pointerInside = false;
+/** A character with room on top, under the pointer while holding another one. */
+let hoverBase: Piece | null = null;
 let keyboard = false;
 let message = '';
 let onSnapshot: (s: Snapshot) => void = () => undefined;
@@ -60,7 +63,7 @@ let onClose: () => void = () => undefined;
 let savedPieces: () => Piece[] = () => pieces;
 
 const selected = () => pieces.find((p) => p.id === selectedId) ?? null;
-const inScene = (p: Piece) => p.placed !== null && sceneAt(p.placed) === scene;
+const inScene = (p: Piece) => p.placed !== null && sceneOfPiece(pieces, p) === scene;
 
 function centerOf(floor: number): CellPos {
   const { cols, rows } = floorsOf(scene)[floor]!;
@@ -87,6 +90,7 @@ function pieceAt(cell: CellPos): Piece | null {
       (p) =>
         inScene(p) &&
         p.placed &&
+        p.placed.on === undefined &&
         floorOf(p.placed) === cell.floor &&
         cellsAt(p.kind, p.placed).some(([x, y]) => x === cell.x && y === cell.y),
     ) ?? null
@@ -111,8 +115,9 @@ function cellFromEvent(event: MouseEvent): CellPos | null {
 function draw(): void {
   if (!editing) return;
   const sel = selected();
-  const showGhost = sel && (pointerInside || keyboard);
-  const placement = sel ? placementAt(cursor, sel) : null;
+  const onTop = sel && hoverBase ? { x: 0, y: 0, flip, on: hoverBase.id } : null;
+  const showGhost = sel && (pointerInside || keyboard || onTop);
+  const placement = sel ? (onTop ?? placementAt(cursor, sel)) : null;
   mountBackground(pieces, {
     scene,
     liftedId: sel?.placed ? sel.id : null,
@@ -215,11 +220,15 @@ host.addEventListener('pointermove', (event) => {
   pointerInside = cell !== null;
   keyboard = false;
   if (cell) cursor = cell;
+  const sel = selected();
+  const drawn = pieceFromEvent(event);
+  hoverBase = sel && drawn && drawn.id !== sel.id && holds(drawn.kind) ? drawn : null;
   draw();
 });
 
 host.addEventListener('pointerleave', () => {
   pointerInside = false;
+  hoverBase = null;
   draw();
 });
 
@@ -227,9 +236,28 @@ host.addEventListener('click', (event) => {
   if (!editing) return;
   const drawn = pieceFromEvent(event);
   const cell = cellFromEvent(event);
-  if (!selected() && drawn) select(drawn);
+  const sel = selected();
+  if (sel && drawn && drawn.id !== sel.id && holds(drawn.kind)) putOnTop(sel, drawn);
+  else if (!sel && drawn) select(drawn);
   else if (cell) void act(cell);
 });
+
+/** Puts the piece in hand on top of a character with room for it (a table, a drum, a hat). */
+function putOnTop(sel: Piece, base: Piece): void {
+  const placement: Placement = { x: 0, y: 0, flip, on: base.id };
+  if (!fits(pieces, sel.kind, placement, sel.id)) {
+    message = S.pieces.noFit;
+    draw();
+    return;
+  }
+  pieces = placePiece(pieces, sel.id, placement);
+  selectedId = null;
+  hoverBase = null;
+  message = '';
+  dirty = true;
+  drawTray();
+  draw();
+}
 
 host.addEventListener('contextmenu', (event) => {
   if (!editing) return;
@@ -337,7 +365,7 @@ export function updateEditor(next: Piece[]): void {
   for (const p of next) {
     if (known.has(p.id)) continue;
     const placed =
-      p.placed && fits(pieces, p.kind, p.placed) ? p.placed : firstFit(pieces, p.kind, p.placed ? sceneAt(p.placed) : scene);
+      p.placed && fits(pieces, p.kind, p.placed) ? p.placed : firstFit(pieces, p.kind, scene);
     pieces = [...pieces, { ...p, placed }];
   }
   if (selectedId && !selected()) selectedId = null;

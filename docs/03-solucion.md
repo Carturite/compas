@@ -69,9 +69,16 @@ Basados en ciclos conocidos de concentración (Pomodoro y bloques largos), siemp
   - `pisos`: superficies donde se paran los personajes, cada una con `cols` × `rows` celdas y sus 4 `esquinas` sobre el
     fondo (fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda, en píxeles de 1280 de ancho). El primero es
     el suelo principal. `bloqueadas`: celdas ocupadas por el decorado. `sobre`: el objeto que lo sostiene.
+    Un `punto` (`[x, y]`) es un piso de 1 cuadrito: un gancho del árbol, del perchero, un nudo de cuerda. `suelo` es la fila
+    de la imagen donde su objeto toca el suelo (la base del árbol, de la cuerda): de ahí salen su tamaño (el ancho de un
+    cuadrito del piso principal a esa profundidad, igual hacia arriba) y su orden de dibujo. Con `piso` (id de otro piso,
+    por ejemplo la plataforma bajo una cuerda) toma el tamaño exacto de ese piso. `celda` en px lo fuerza.
+    `colgar`: los personajes que cuelgan (`cuelga`, como el perico) cuelgan de ahí en vez de pararse.
   - `objetos`: decorado recortado del fondo (polígono, `base` = fila donde toca el suelo, `llave` para quitar pasto
     y piedras por color) que se vuelve a dibujar entre los personajes para tapar a los que están detrás.
-  - `personajes`: id → `recorte` (`hoja.png#n`), `ancho` (1 o 2 cuadritos) y `nombre`.
+  - `personajes`: id → `recorte` (`hoja.png#n`), `ancho` (1 o 2 cuadritos) y `nombre`; opcional `encima` (altura de su
+    dibujo, 0 = arriba, donde puede pararse otro personaje: mesa, tambor, sombrero), `cuelga` y `escala` (si en la hoja
+    lo dibujaron más grande o más chico que el resto, como la bailarina del jardín, 0,75).
 - **`scripts/escenas.py`** (herramienta, necesita Pillow; la extensión no tiene dependencias) recorta los personajes,
   limpia el halo casi invisible del recorte de fondo, recorta los objetos, achica todo a WebP en `public/escenas/<id>/`
   y genera `src/core/scenes.gen.ts`. Con `--check` deja `_recortes.png` (recortes numerados) y `_vista.png` (pisos y
@@ -83,10 +90,15 @@ Basados en ciclos conocidos de concentración (Pomodoro y bloques largos), siemp
   (`Placement.scene`, sin `scene` = jardín; `Placement.floor`, sin `floor` = suelo principal; ambos viajan en la
   sincronización). Un personaje ocupa 1 o 2 cuadritos a lo ancho y una fila de fondo; su alto sale del dibujo
   (`sw`, `sh` en anchos de cuadrito), así un gatito que se estira ocupa una celda pero se ve alto. No se gira, se voltea (`flip`).
+  Hoy todos ocupan 1 cuadrito salvo el tambor y el cañón.
+- **Uno encima de otro:** `Placement.on` = id de la pieza que lo sostiene (una sola por pieza, sin bucles). No ocupa celdas:
+  se dibuja parado a la altura `encima` de la base, a su escala, y se mueve con ella; si la base va a la bandeja, también él.
 - **Perspectiva:** cada piso se proyecta sobre el fondo con una homografía desde sus 4 esquinas (`core/perspective.ts`),
   así sirve igual para uno o dos puntos de fuga. Cada personaje se para cerca del borde delantero de sus celdas, con el
   ancho que esas celdas tienen a esa distancia, y todo (personajes y objetos) se dibuja de atrás hacia adelante según la
   fila donde toca el suelo. Un personaje sobre un piso elevado va justo después del objeto que lo sostiene.
+  **El último dejado queda adelante:** a la misma profundidad (misma fila, mismo árbol, cuerda o perchero) manda el orden
+  en que se dejaron (`Placement.z`, que también sincroniza); entre filas distintas sigue mandando la perspectiva.
 - **Dibujo:** `shared/scene.ts` + `shared/board.ts` pintan la escena actual como SVG en una capa fija detrás de cada página
   (popup, bloqueo y ajustes), difuminada y con baja opacidad; de fondo llena la pantalla (`slice`), al editar se ve entera
   (`meet`) con la cuadrícula de cada piso.

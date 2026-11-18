@@ -98,14 +98,42 @@ function invert(m) {
   const r = [e * i - f * h, c * h - b * i, b * f - c * e, f * g - d * i, a * i - c * g, c * d - a * f, d * h - e * g, b * g - a * h, a * e - b * d];
   return r.map((v) => v / r[8]);
 }
+/** Cell width of the main floor at a picture point, extending its perspective (scripts/escenas.py ground_cell). */
+function groundCell(x, y) {
+  const main = escena.pisos.find((f) => !f.punto);
+  if (!main) return 50;
+  const m = squareToQuad(main.esquinas);
+  const [u, v] = apply(invert(m), x, y);
+  const half = 0.5 / main.cols;
+  const [ax, ay] = apply(m, u - half, v), [bx, by] = apply(m, u + half, v);
+  return Math.hypot(bx - ax, by - ay);
+}
+/**
+ * A "punto" (peg, knot, bar) is a 1 × 1 floor, like scripts/escenas.py expand_floor: as wide as a cell of the main
+ * floor where its object stands ("suelo"), or "celda" px if given.
+ */
+/** Cell width where characters stand on a floor (scripts/escenas.py floor_cell). */
+function floorCell(f) {
+  const m = squareToQuad(f.esquinas), v = 1 - 0.15 / f.rows, c = Math.floor(f.cols / 2);
+  const [ax, ay] = apply(m, c / f.cols, v), [bx, by] = apply(m, (c + 1) / f.cols, v);
+  return [Math.hypot(bx - ax, by - ay), (ay + by) / 2];
+}
+function expand(p) {
+  if (!p.punto) return p;
+  const [x, y] = p.punto;
+  const on = p.piso && escena.pisos.find((f) => f.id === p.piso && !f.punto);
+  const half = (on ? floorCell(on)[0] : p.celda ?? (p.suelo !== undefined ? groundCell(x, p.suelo) : 50)) / 2;
+  return { ...p, cols: 1, rows: 1, esquinas: [[x - half, y - 6], [x + half, y - 6], [x + half, y], [x - half, y]] };
+}
 function view(p) {
+  p = expand(p);
   const m = squareToQuad(p.esquinas);
   return { t: (x, y) => apply(m, x / p.cols, y / p.rows), back: invert(m) };
 }
 function cellAt(px, py) {
   const pisos = escena.pisos;
   for (let i = pisos.length - 1; i >= 0; i--) {
-    const p = pisos[i];
+    const p = expand(pisos[i]);
     const [u, v] = apply(view(p).back, px, py);
     const x = Math.floor(u * p.cols), y = Math.floor(v * p.rows);
     if (x >= 0 && y >= 0 && x < p.cols && y < p.rows) return { i, x, y };
@@ -150,7 +178,8 @@ async function loadScene(id) {
 const pts = (a) => a.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
 function draw() {
   const out = [`<image href="/img/escenas/${sid}/${escena.fondo}" x="0" y="0" width="${W}" height="${H}"/>`];
-  escena.pisos.forEach((p, i) => {
+  escena.pisos.forEach((p0, i) => {
+    const p = expand(p0);
     const { t } = view(p);
     const blocked = new Set((p.bloqueadas || []).map((c) => c.join()));
     const isSel = sel?.kind === 'piso' && sel.i === i;
@@ -170,7 +199,7 @@ function draw() {
   if (trying && mouse) {
     const c = cellAt(...mouse);
     if (c) {
-      const p = escena.pisos[c.i];
+      const p = expand(escena.pisos[c.i]);
       const w = Number(personajeOf(trying.recorte)?.ancho || 1);
       const x = Math.min(c.x, p.cols - w);
       const { t } = view(p);
@@ -178,12 +207,18 @@ function draw() {
       const cell = Math.hypot(bx - ax, by - ay) / w;
       const sheet = trying.recorte.split('#')[0];
       const celda = escena.hojas.find((h) => h.archivo === sheet)?.celda || 250;
-      const sw = (trying.nw / celda) * cell, sh = (trying.nh / celda) * cell;
+      const k = personajeOf(trying.recorte)?.escala ?? 1;
+      const sw = (trying.nw * k / celda) * cell, sh = (trying.nh * k / celda) * cell;
       out.push(`<image href="/img/escenas/${sid}/_recortes/${trying.archivo}" x="${(ax + bx) / 2 - sw / 2}" y="${(ay + by) / 2 - sh}" width="${sw}" height="${sh}" preserveAspectRatio="xMidYMax meet"/>`);
     }
   }
   // Handles of what is selected, and the points being clicked.
-  if (sel?.kind === 'piso') escena.pisos[sel.i].esquinas.forEach(([x, y], k) => out.push(`<circle class="handle" data-h="${k}" cx="${x}" cy="${y}" r="7"/><text class="label" x="${x + 9}" y="${y - 9}">${k + 1}</text>`));
+  if (sel?.kind === 'piso' && escena.pisos[sel.i].punto) {
+    const f = escena.pisos[sel.i], [x, y] = f.punto;
+    out.push(`<circle class="handle" data-h="punto" cx="${x}" cy="${y}" r="7"/>`);
+    if (f.suelo !== undefined) out.push(`<line class="base" x1="${x - 60}" x2="${x + 60}" y1="${f.suelo}" y2="${f.suelo}"/><rect class="handle" data-h="suelo" x="${x - 7}" y="${f.suelo - 7}" width="14" height="14"/>`);
+  }
+  else if (sel?.kind === 'piso') escena.pisos[sel.i].esquinas.forEach(([x, y], k) => out.push(`<circle class="handle" data-h="${k}" cx="${x}" cy="${y}" r="7"/><text class="label" x="${x + 9}" y="${y - 9}">${k + 1}</text>`));
   if (sel?.kind === 'objeto') {
     const o = Object.values(escena.objetos)[sel.i];
     o.poligono.forEach(([x, y], k) => out.push(`<circle class="handle" data-h="${k}" cx="${x}" cy="${y}" r="6"/>`));
@@ -214,16 +249,18 @@ function panel() {
       <div class="row"><span>Se abre con</span><input id="f-desbloqueo" type="number" min="0" value="${escena.desbloqueo ?? 0}"><span class="muted">personajes ganados</span></div>
       <p class="help">Hojas de personajes. "celda" = cuántos píxeles de la hoja mide un cuadrito: más grande = personajes más chicos. Pruébalo en la pestaña Personajes.</p>${sheets}`;
   } else if (tab === 'pisos') {
-    P.innerHTML = `<p class="help">${mode === 'nuevoPiso' ? `Haz clic en las 4 esquinas del piso: <b>fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda</b>. (${pending.length}/4)` : 'El primer piso es el suelo principal. Selecciona uno para arrastrar sus esquinas.'}</p>
+    P.innerHTML = `<p class="help">${mode === 'nuevoPunto' ? 'Haz clic donde se para (o de donde cuelga) el personaje: un gancho, un nudo, una barra. Luego arrastra la línea punteada hasta donde su objeto toca el suelo: de ahí sale el tamaño.' : mode === 'nuevoPiso' ? `Haz clic en las 4 esquinas del piso: <b>fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda</b>. (${pending.length}/4)` : 'El primer piso es el suelo principal. Selecciona uno para arrastrar sus esquinas.'}</p>
       ${escena.pisos.map((p, i) => `<div class="row${sel?.kind === 'piso' && sel.i === i ? ' sel' : ''}">
         <input data-pid="${i}" value="${esc(p.id)}" style="width:110px">
-        <input type="number" data-pcols="${i}" value="${p.cols}" min="1" title="columnas"> ×
-        <input type="number" data-prows="${i}" value="${p.rows}" min="1" title="filas">
+        ${p.punto ? `<span class="muted" title="Fila del suelo donde se para su objeto (árbol, cuerda): de ahí sale su tamaño">suelo</span><input type="number" data-psuelo="${i}" value="${p.suelo ?? ''}" title="arrastra el cuadrito de la línea punteada">
+        <select data-ppiso="${i}" title="O el piso donde se apoya su objeto (una cuerda sobre una plataforma): mismo tamaño que ahí"><option value="">en el suelo</option>${escena.pisos.filter((f) => !f.punto).map((f) => `<option ${p.piso === f.id ? 'selected' : ''}>${esc(f.id)}</option>`).join('')}</select>` : `<input type="number" data-pcols="${i}" value="${p.cols}" min="1" title="columnas"> ×
+        <input type="number" data-prows="${i}" value="${p.rows}" min="1" title="filas">`}
+        <label title="Los que cuelgan (como el perico) cuelgan de aquí"><input type="checkbox" data-pcolgar="${i}" ${p.colgar ? 'checked' : ''}> colgar</label>
         <select data-psobre="${i}"><option value="">sin objeto</option>${Object.keys(escena.objetos).map((n) => `<option ${p.sobre === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
         <button data-psel="${i}">Editar</button>
         <button data-pblock="${i}" aria-pressed="${mode === 'bloquear' && sel?.i === i}">Bloquear</button>
         <button data-pdel="${i}">✕</button></div>`).join('')}
-      <button id="new-floor">+ Piso nuevo</button>
+      <button id="new-floor">+ Piso nuevo</button> <button id="new-point">+ Punto (1 cuadrito)</button>
       <p class="help">"Bloquear": clic en celdas ocupadas por el decorado. "sin objeto / objeto": si el piso está encima de un objeto (banco, tarima), los personajes se dibujan sobre él.</p>`;
   } else if (tab === 'objetos') {
     const names = Object.keys(escena.objetos);
@@ -243,7 +280,10 @@ function panel() {
         <input type="text" data-cid="${k}" value="${esc(p?.id ?? `${sid}-${k}`)}" placeholder="id">
         <input type="text" data-cname="${k}" value="${esc(p?.nombre ?? '')}" placeholder="nombre">
         <span><select data-cw="${k}"><option value="1" ${p?.ancho !== 2 ? 'selected' : ''}>1 cuadrito</option><option value="2" ${p?.ancho === 2 ? 'selected' : ''}>2 cuadritos</option></select>
-        <button data-ctry="${k}" aria-pressed="${trying === c}">Probar</button></span></div>`; }).join('')}</div>`
+        <button data-ctry="${k}" aria-pressed="${trying === c}">Probar</button></span>
+        <span><label title="Altura de su dibujo donde puede pararse otro (0 = arriba, 1 = pies). Vacío = nadie."><span class="muted">encima</span> <input type="number" data-ctop="${k}" step="0.01" min="0" max="1" value="${p?.encima ?? ''}" style="width:64px"></label>
+        <label title="Cuelga de sus patitas en los puntos para colgar"><input type="checkbox" data-chang="${k}" ${p?.cuelga ? 'checked' : ''}> cuelga</label>
+        <label title="Si en la hoja lo dibujaron más grande o más chico que el resto"><span class="muted">escala</span> <input type="number" data-cscale="${k}" step="0.05" min="0.2" max="3" value="${p?.escala ?? 1}" style="width:64px"></label></span></div>`; }).join('')}</div>`
       : '<p class="help">Guarda una vez para cortar las hojas de esta escena.</p>';
   }
 }
@@ -264,7 +304,9 @@ svg.addEventListener('pointermove', (event) => {
   mouse = point(event);
   if (drag !== null && sel) {
     const [x, y] = mouse;
-    if (sel.kind === 'piso') escena.pisos[sel.i].esquinas[Number(drag)] = [x, y];
+    if (sel.kind === 'piso' && drag === 'punto') escena.pisos[sel.i].punto = [x, y];
+    else if (sel.kind === 'piso' && drag === 'suelo') escena.pisos[sel.i].suelo = y;
+    else if (sel.kind === 'piso') escena.pisos[sel.i].esquinas[Number(drag)] = [x, y];
     else { const o = Object.values(escena.objetos)[sel.i]; if (drag === 'base') o.base = y; else o.poligono[Number(drag)] = [x, y]; }
     draw();
   } else if (trying) draw();
@@ -273,7 +315,11 @@ svg.addEventListener('pointerup', () => { if (drag !== null) { drag = null; pane
 svg.addEventListener('click', (event) => {
   if (event.target.closest('[data-h]')) return;
   const p = point(event);
-  if (mode === 'nuevoPiso') {
+  if (mode === 'nuevoPunto') {
+    escena.pisos.push({ id: `punto-${escena.pisos.length}`, punto: p, suelo: p[1] + 100, colgar: true });
+    sel = { kind: 'piso', i: escena.pisos.length - 1 }; mode = 'idle';
+    render();
+  } else if (mode === 'nuevoPiso') {
     pending.push(p);
     if (pending.length === 4) {
       escena.pisos.push({ id: escena.pisos.length ? `piso-${escena.pisos.length}` : 'suelo', cols: escena.pisos.length ? 3 : 8, rows: escena.pisos.length ? 1 : 4, esquinas: pending });
@@ -322,7 +368,13 @@ function setPersonaje(k) {
   for (const [id, p] of Object.entries(escena.personajes)) if (p.recorte === c.recorte) delete escena.personajes[id];
   if (use) {
     const id = card.querySelector('[data-cid]').value.trim() || `${sid}-${k}`;
-    escena.personajes[id] = { recorte: c.recorte, ancho: Number(card.querySelector('[data-cw]').value), nombre: card.querySelector('[data-cname]').value.trim() || id };
+    const entry = { recorte: c.recorte, ancho: Number(card.querySelector('[data-cw]').value), nombre: card.querySelector('[data-cname]').value.trim() || id };
+    const top = card.querySelector('[data-ctop]').value;
+    if (top !== '') entry.encima = Math.min(1, Math.max(0, Number(top)));
+    if (card.querySelector('[data-chang]').checked) entry.cuelga = true;
+    const scale = Number(card.querySelector('[data-cscale]').value);
+    if (scale && scale !== 1) entry.escala = scale;
+    escena.personajes[id] = entry;
   }
   card.classList.toggle('on', use);
 }
@@ -339,11 +391,14 @@ $('#panel').addEventListener('change', (e) => {
   else if (d.pid !== undefined) escena.pisos[d.pid].id = t.value.trim();
   else if (d.pcols !== undefined) escena.pisos[d.pcols].cols = Math.max(1, Number(t.value));
   else if (d.prows !== undefined) escena.pisos[d.prows].rows = Math.max(1, Number(t.value));
+  else if (d.ppiso !== undefined) { if (t.value) { escena.pisos[d.ppiso].piso = t.value; delete escena.pisos[d.ppiso].celda; } else delete escena.pisos[d.ppiso].piso; }
+  else if (d.psuelo !== undefined) { if (t.value === '') delete escena.pisos[d.psuelo].suelo; else { escena.pisos[d.psuelo].suelo = Number(t.value); delete escena.pisos[d.psuelo].celda; } }
+  else if (d.pcolgar !== undefined) { if (t.checked) escena.pisos[d.pcolgar].colgar = true; else delete escena.pisos[d.pcolgar].colgar; }
   else if (d.psobre !== undefined) { if (t.value) escena.pisos[d.psobre].sobre = t.value; else delete escena.pisos[d.psobre].sobre; }
   else if (d.oname !== undefined) renameProp(Number(d.oname), t.value.trim());
   else if (d.obase !== undefined) Object.values(escena.objetos)[d.obase].base = Number(t.value);
   else if (d.okey !== undefined) Object.values(escena.objetos)[d.okey].llave = t.checked;
-  else for (const k of ['cuse', 'cid', 'cname', 'cw']) if (d[k] !== undefined) { setPersonaje(Number(d[k])); break; }
+  else for (const k of ['cuse', 'cid', 'cname', 'cw', 'ctop', 'chang', 'cscale']) if (d[k] !== undefined) { setPersonaje(Number(d[k])); break; }
   draw();
 });
 $('#panel').addEventListener('click', (e) => {
@@ -351,6 +406,7 @@ $('#panel').addEventListener('click', (e) => {
   if (!t) return;
   const d = t.dataset;
   if (t.id === 'new-floor') { mode = 'nuevoPiso'; pending = []; sel = null; }
+  else if (t.id === 'new-point') { mode = 'nuevoPunto'; pending = []; sel = null; }
   else if (t.id === 'new-prop') { mode = 'nuevoObjeto'; pending = []; sel = null; }
   else if (t.id === 'finish-prop') return finishProp();
   else if (t.id === 'cancel-new') { mode = 'idle'; pending = []; }

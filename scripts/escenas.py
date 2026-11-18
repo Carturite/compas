@@ -160,6 +160,64 @@ def export_cuts(folder: Path, cuts: dict, sheets: dict[str, int]) -> None:
     (target / "indice.json").write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
 
 
+def invert3(m):
+    a, b, c, d, e, f, g, h, i = m
+    r = [e * i - f * h, c * h - b * i, b * f - c * e, f * g - d * i, a * i - c * g, c * d - a * f,
+         d * h - e * g, b * g - a * h, a * e - b * d]
+    return [v / r[8] for v in r]
+
+
+def ground_cell(main: dict, x: float, y: float) -> float:
+    """Width of one cell of the main floor at picture point (x, y), extending its perspective if (x, y) is outside it.
+    A peg, a rope or a trellis keeps that size all the way up: height in the picture is not depth."""
+    t = homography(main["esquinas"])
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = main["esquinas"]
+    # Same matrix as homography(), as 9 numbers, to invert it.
+    dx1, dx2, dx3 = x1 - x2, x3 - x2, x0 - x1 + x2 - x3
+    dy1, dy2, dy3 = y1 - y2, y3 - y2, y0 - y1 + y2 - y3
+    if abs(dx3) < 1e-9 and abs(dy3) < 1e-9:
+        m = [x1 - x0, x3 - x0, x0, y1 - y0, y3 - y0, y0, 0, 0, 1]
+    else:
+        den = dx1 * dy2 - dx2 * dy1
+        g = (dx3 * dy2 - dx2 * dy3) / den
+        h = (dx1 * dy3 - dx3 * dy1) / den
+        m = [x1 - x0 + g * x1, x3 - x0 + h * x3, x0, y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h, 1]
+    r = invert3(m)
+    w = r[6] * x + r[7] * y + r[8]
+    u, v = (r[0] * x + r[1] * y + r[2]) / w, (r[3] * x + r[4] * y + r[5]) / w
+    half = 0.5 / main["cols"]
+    (ax, ay), (bx, by) = t(u - half, v), t(u + half, v)
+    return ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+
+
+def floor_cell(floor: dict) -> tuple[float, float]:
+    """Width of a cell where characters stand on a floor (middle column, near its front edge), and that picture row."""
+    t = homography(floor["esquinas"])
+    v = 1 - 0.15 / floor["rows"]
+    c = floor["cols"] // 2
+    (ax, ay), (bx, by) = t(c / floor["cols"], v), t((c + 1) / floor["cols"], v)
+    return ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5, (ay + by) / 2
+
+
+def expand_floor(piso: dict, main: dict | None = None, floors: dict | None = None) -> dict:
+    """A "punto" (one-cell spot: a peg, a knot, a bar) becomes a 1 × 1 floor. Its size and drawing order come from
+    where its object stands: "piso" (another floor, e.g. the platform under a rope: same size as there), or "suelo"
+    (a picture row of the main floor, extending its perspective), or "celda" px if given."""
+    if "punto" not in piso:
+        return piso
+    x, y = piso["punto"]
+    if "piso" in piso and floors and piso["piso"] in floors:
+        cell, ground = floor_cell(floors[piso["piso"]])
+        piso = {**piso, "suelo": round(ground, 1)}
+    elif "celda" in piso or main is None or "suelo" not in piso:
+        cell = piso.get("celda", 50)
+    else:
+        cell = ground_cell(main, x, piso["suelo"])
+    half = cell / 2
+    return {**piso, "cols": 1, "rows": 1,
+            "esquinas": [[x - half, y - 6], [x + half, y - 6], [x + half, y], [x - half, y]]}
+
+
 def homography(q):
     """Same map as src/core/perspective.ts squareToQuad, for the preview."""
     (x0, y0), (x1, y1), (x2, y2), (x3, y3) = q
@@ -179,7 +237,9 @@ def homography(q):
 def preview(bg: Image.Image, escena: dict, path: Path) -> None:
     out = bg.convert("RGBA")
     draw = ImageDraw.Draw(out)
-    for piso in escena["pisos"]:
+    main = escena["pisos"][0] if escena["pisos"] else None
+    plain = {p["id"]: p for p in escena["pisos"] if "punto" not in p}
+    for piso in (expand_floor(p, main, plain) for p in escena["pisos"]):
         t = homography(piso["esquinas"])
         cols, rows = piso["cols"], piso["rows"]
         blocked = {tuple(c) for c in piso.get("bloqueadas", [])}
@@ -241,15 +301,27 @@ def build(folder: Path, check: bool, seen_ids: set[str]) -> dict:
         if p["ancho"] not in (1, 2):
             raise SystemExit(f"{sid}: {cid} debe ocupar 1 o 2 cuadritos")
         # w: cells of floor it takes (1 or 2, one row deep). sw, sh: how big it looks, in cell widths.
-        cast.append({"id": cid, "w": p["ancho"], "sw": round(nw / cell, 2), "sh": round(nh / cell, 2),
-                     "name": p["nombre"]})
+        scale = p.get("escala", 1)  # for a drawing made bigger or smaller than the rest of its sheet
+        entry = {"id": cid, "w": p["ancho"], "sw": round(nw * scale / cell, 2), "sh": round(nh * scale / cell, 2),
+                 "name": p["nombre"]}
+        if "encima" in p:
+            entry["top"] = p["encima"]  # where on its drawing another character can stand (0 = top edge)
+        if p.get("cuelga"):
+            entry["hang"] = True  # hangs from its feet on floors made for hanging
+        cast.append(entry)
 
     floors = []
-    for piso in escena["pisos"]:
+    main = escena["pisos"][0] if escena["pisos"] else None
+    plain = {p["id"]: p for p in escena["pisos"] if "punto" not in p}
+    for piso in (expand_floor(p, main, plain) for p in escena["pisos"]):
         floor = {"id": piso["id"], "cols": piso["cols"], "rows": piso["rows"],
-                 "blocked": piso.get("bloqueadas", []), "ground": piso["esquinas"]}
+                 "blocked": piso.get("bloqueadas", []), "ground": [[round(a, 1), round(b, 1)] for a, b in piso["esquinas"]]}
+        if "suelo" in piso:
+            floor["depth"] = piso["suelo"]  # drawn by where its object stands, not by how high the spot is
         if "sobre" in piso:
             floor["over"] = prop_names.index(piso["sobre"])
+        if piso.get("colgar"):
+            floor["hang"] = True
         floors.append(floor)
     assert len(set(floor_ids)) == len(floor_ids), f"{sid}: pisos repetidos"
 

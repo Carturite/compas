@@ -18,6 +18,10 @@ export interface FloorData {
   ground: readonly [XY, XY, XY, XY];
   /** Index of the prop this floor sits on (bench, platform). */
   over?: number;
+  /** A peg, rope or bar: characters that hang (`hang` in the cast) hang below it instead of standing on it. */
+  hang?: boolean;
+  /** Picture row where the object holding this spot stands (a tree, a rope): its drawing order, whatever its height. */
+  depth?: number;
 }
 
 export interface SceneData {
@@ -30,7 +34,17 @@ export interface SceneData {
   floors: readonly FloorData[];
   props: readonly { name: string; x: number; y: number; w: number; h: number; base: number }[];
   /** w: floor cells it takes (1 or 2, one row deep). sw, sh: how big it looks, in cell widths. */
-  cast: readonly { id: string; w: number; sw: number; sh: number; name: string }[];
+  cast: readonly {
+    id: string;
+    w: number;
+    sw: number;
+    sh: number;
+    name: string;
+    /** Another character can stand on it, at this height of its drawing (0 = top edge, 1 = feet). */
+    top?: number;
+    /** Hangs from its feet on hanging floors. */
+    hang?: boolean;
+  }[];
 }
 
 export { SCENES };
@@ -38,7 +52,7 @@ export { SCENES };
 export type CastId = (typeof SCENES)[number]['cast'][number]['id'];
 
 const ALL: readonly SceneData[] = SCENES;
-const INFO = new Map<string, { scene: number; w: number; sw: number; sh: number; name: string }>();
+const INFO = new Map<string, { scene: number; w: number; sw: number; sh: number; name: string; top?: number; hang?: boolean }>();
 ALL.forEach((s, scene) => s.cast.forEach((c) => INFO.set(c.id, { scene, ...c })));
 
 export const sceneData = (scene: number): SceneData => ALL[scene]!;
@@ -64,6 +78,15 @@ export function footprint(kind: CastId): { w: number; h: number } {
 export function lookSize(kind: CastId): { w: number; h: number } {
   const c = INFO.get(kind)!;
   return { w: c.sw, h: c.sh };
+}
+
+/** Height on its drawing where another character can stand (0 = top), or undefined if nothing fits on it. */
+export function topOf(kind: CastId): number | undefined {
+  return INFO.get(kind)!.top;
+}
+
+export function hangs(kind: CastId): boolean {
+  return INFO.get(kind)!.hang === true;
 }
 
 export function castName(kind: CastId): string {

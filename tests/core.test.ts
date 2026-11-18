@@ -192,26 +192,26 @@ test('every character takes 1 or 2 cells, one row deep, and keeps its drawing pr
   assert.ok(PIECE_KINDS.every((k) => [1, 2].includes(shapeSize(k).w) && shapeSize(k).h === 1));
   assert.deepEqual(shapeSize('1-06'), { w: 1, h: 1 }, 'stretching up takes one cell…');
   assert.ok(lookSize('1-06').h > 1.4 * lookSize('1-06').w, '…but looks tall');
-  assert.deepEqual(shapeSize('1-16'), { w: 2, h: 1 }, 'sleeping is long');
-  assert.deepEqual(cellsAt('1-00', { x: 3, y: 1, flip: true }), [[3, 1], [4, 1]]);
+  assert.deepEqual(shapeSize('circo-tambor'), { w: 2, h: 1 }, 'the drum is wide');
+  assert.deepEqual(cellsAt('circo-canon', { x: 3, y: 1, flip: true }), [[3, 1], [4, 1]]);
 });
 
 test('fits respects the board edges and other pieces', () => {
-  assert.ok(fits([], '1-16', { x: BOARD_COLS - 2, y: 0, flip: false }));
-  assert.ok(!fits([], '1-16', { x: BOARD_COLS - 1, y: 0, flip: false }));
+  assert.ok(fits([], 'circo-tambor', { x: BOARD_COLS - 2, y: 0, flip: false }));
+  assert.ok(!fits([], 'circo-tambor', { x: BOARD_COLS - 1, y: 0, flip: false }));
   assert.ok(fits([], '1-06', { x: 3, y: BOARD_ROWS - 1, flip: false }));
   assert.ok(!fits([], '1-06', { x: 3, y: BOARD_ROWS, flip: false }));
-  assert.ok(!fits([], '1-00', { x: -1, y: 0, flip: false }));
-  const board = [piece('a', '1-00', { x: 0, y: 0, flip: false })];
-  assert.ok(!fits(board, '1-00', { x: 1, y: 0, flip: false }));
-  assert.ok(fits(board, '1-00', { x: 2, y: 0, flip: false }));
+  assert.ok(!fits([], 'circo-canon', { x: -1, y: 0, flip: false }));
+  const board = [piece('a', 'circo-canon', { x: 0, y: 0, flip: false })];
+  assert.ok(!fits(board, 'circo-canon', { x: 1, y: 0, flip: false }));
+  assert.ok(fits(board, 'circo-canon', { x: 2, y: 0, flip: false }));
   // A piece never collides with itself while being moved.
-  assert.ok(fits(board, '1-00', { x: 1, y: 0, flip: false }, 'a'));
+  assert.ok(fits(board, 'circo-canon', { x: 1, y: 0, flip: false }, 'a'));
 });
 
 test('first fit fills from the left edge and the front backwards', () => {
   // The front-left lawn cells hold a bench, so the first spot is one row back.
-  assert.deepEqual(firstFit([], '1-00'), { x: 0, y: BOARD_ROWS - 2, flip: false });
+  assert.deepEqual(firstFit([], 'circo-canon'), { x: 0, y: BOARD_ROWS - 2, flip: false });
 });
 
 test('earned pieces land on the boards, and go to the tray when everything is full', () => {
@@ -224,10 +224,10 @@ test('earned pieces land on the boards, and go to the tray when everything is fu
 });
 
 test('placing moves a piece only when it fits', () => {
-  const pieces = [piece('a', '1-00', { x: 0, y: 0, flip: false }), piece('b', '1-12', null)];
+  const pieces = [piece('a', 'circo-canon', { x: 0, y: 0, flip: false }), piece('b', '1-12', null)];
   assert.equal(placePiece(pieces, 'b', { x: 1, y: 0, flip: false }), pieces);
   const moved = placePiece(pieces, 'b', { x: 5, y: 2, flip: true });
-  assert.deepEqual(moved[1]!.placed, { x: 5, y: 2, flip: true });
+  assert.deepEqual(moved[1]!.placed, { x: 5, y: 2, flip: true, z: 1 }, 'z: placed last, in front at its depth');
   assert.equal(placePiece(pieces, 'zzz', { x: 5, y: 2, flip: false }), pieces);
   assert.equal(unplacePiece(moved, 'b')[1]!.placed, null);
 });
@@ -260,20 +260,20 @@ test('old data gets one piece per completed session; bad stored pieces are clean
   ];
   assert.equal(piecesFromHistory(history).length, 2);
   const cleaned = normalizePieces([
-    piece('a', '1-00', { x: 0, y: 0, flip: false }),
-    piece('b', '1-00', { x: 1, y: 0, flip: false }), // overlaps a
+    piece('a', 'circo-canon', { x: 0, y: 0, flip: false }),
+    piece('b', 'circo-canon', { x: 1, y: 0, flip: false }), // overlaps a
     { id: 'c', kind: 'X' },
     null,
   ]);
   assert.equal(cleaned.length, 2);
   // The overlapping piece finds a free spot instead of being lost.
   assert.deepEqual(cleaned[0]!.placed, { x: 0, y: 0, flip: false });
-  assert.ok(cleaned[1]!.placed && fits([cleaned[0]!], '1-00', cleaned[1]!.placed));
+  assert.ok(cleaned[1]!.placed && fits([cleaned[0]!], 'circo-canon', cleaned[1]!.placed));
 });
 
 test('pieces whose spot no longer works move to free spots of their scene, or the tray', () => {
-  const outside = Array.from({ length: 60 }, (_, i) => piece(`o${i}`, '1-00', { x: 12 + i, y: 7, flip: false }));
-  const kept = piece('k', '1-00', { x: 0, y: 0, flip: false });
+  const outside = Array.from({ length: 60 }, (_, i) => piece(`o${i}`, 'circo-canon', { x: 12 + i, y: 7, flip: false }));
+  const kept = piece('k', 'circo-canon', { x: 0, y: 0, flip: false });
   const result = normalizePieces([...outside, kept]);
   assert.deepEqual(result.at(-1)!.placed, kept.placed, 'valid spots win over moved pieces');
   assert.equal(new Set(cellKeys(result)).size, cellKeys(result).length, 'no overlaps');
@@ -374,7 +374,7 @@ test('two devices converge after one round trip', () => {
 import { applyBoard, layoutOf } from '../src/core/board.js';
 
 test('saving the board applies every position at once, or none', () => {
-  const pieces = [piece('a', '1-00', { x: 0, y: 0, flip: false }), piece('b', '1-12', null)];
+  const pieces = [piece('a', 'circo-canon', { x: 0, y: 0, flip: false }), piece('b', '1-12', null)];
   const ok = applyBoard(pieces, { a: { x: 4, y: 3, flip: false }, b: { x: 0, y: 0, flip: false } });
   assert.deepEqual(layoutOf(ok), { a: { x: 4, y: 3, flip: false }, b: { x: 0, y: 0, flip: false } });
   const clash = applyBoard(pieces, { b: { x: 0, y: 0, flip: false } }); // a is still there
@@ -414,12 +414,12 @@ const FLOORS = floorsOf(0);
 
 test('raised floors hold characters that fit them, and scenery cells hold none', () => {
   const tarima = FLOORS.findIndex((f) => f.id === 'tarima');
-  assert.ok(fits([], '1-16', { x: 1, y: 0, flip: false, floor: tarima }), 'a sleeping kitten fits the platform');
-  assert.ok(!fits([], '1-16', { x: 2, y: 0, flip: false, floor: tarima }), 'but not past its edge');
+  assert.ok(fits([], 'circo-tambor', { x: 1, y: 0, flip: false, floor: tarima }), 'the drum fits the platform');
+  assert.ok(!fits([], 'circo-tambor', { x: 2, y: 0, flip: false, floor: tarima }), 'but not past its edge');
   assert.ok(!fits([], '1-02', { x: 0, y: 4, flip: false }), 'the bench stands on that lawn cell');
   assert.ok(!fits([], '1-02', { x: 0, y: 0, flip: false, floor: 99 }));
-  const a = piece('a', '1-16', { x: 0, y: 0, flip: false, floor: tarima });
-  assert.ok(fits([a], '1-16', { x: 0, y: 0, flip: false }), 'same cell numbers on another floor are free');
+  const a = piece('a', 'circo-tambor', { x: 0, y: 0, flip: false, floor: tarima });
+  assert.ok(fits([a], 'circo-tambor', { x: 0, y: 0, flip: false }), 'same cell numbers on another floor are free');
   assert.ok(!fits([a], '1-02', { x: 1, y: 0, flip: false, floor: tarima }));
 });
 
@@ -433,7 +433,7 @@ test('floor and scene travel between devices', () => {
   const d = {
     ...deviceWith([T0]),
     pieces: [
-      piece('a', '1-16', { x: 0, y: 0, flip: true, floor: 3 }),
+      piece('a', 'circo-tambor', { x: 0, y: 0, flip: true, floor: 3 }),
       piece('b', '1-09', { x: 1, y: 0, flip: false, floor: 4, scene: 'circo' }),
     ],
   };
@@ -464,7 +464,7 @@ test('any character can stand in any scene', () => {
   assert.ok(fits([], 'circo-ninfa', { x: 0, y: 0, flip: false }), 'a bird in the garden');
   assert.ok(fits([], '1-06', { x: 0, y: 0, flip: false, floor: 4, scene: 'circo' }), 'a kitten on a trapeze');
   assert.ok(!fits([], '1-06', { x: 0, y: 0, flip: false, scene: 'luna' }), 'not in a scene that does not exist');
-  const kitten = piece('k', '1-00', { x: 0, y: 0, flip: false });
+  const kitten = piece('k', 'circo-canon', { x: 0, y: 0, flip: false });
   assert.ok(fits([kitten], 'circo-tucan', { x: 0, y: 0, flip: false, scene: 'circo' }), 'garden cells do not block the circus');
 });
 
@@ -487,4 +487,54 @@ test('a device writes only when it brings something new, so versions never ping-
   assert.equal(hasNews(merge(a, older), older), false, 'a difference in form alone is not news');
   const b = completeNow(a, T0 + 30 * MINUTE);
   assert.equal(hasNews(b, shared), true, 'a new piece and session are news');
+});
+
+// ---- Characters on top of others ----
+
+import { holds, rootOf } from '../src/core/board.js';
+
+test('a table, a drum and a hat hold one more character; it moves and leaves with them', () => {
+  assert.ok(holds('circo-mesa') && holds('circo-tambor') && holds('circo-sombrero'));
+  assert.ok(!holds('1-09'));
+  const table = piece('t', 'circo-mesa', { x: 4, y: 2, flip: false });
+  const cat = piece('c', '1-09', null);
+  const bird = piece('b', 'circo-ninfa', null);
+  let pieces = [table, cat, bird];
+  pieces = placePiece(pieces, 'c', { x: 0, y: 0, flip: true, on: 't' });
+  assert.deepEqual(pieces[1]!.placed, { x: 0, y: 0, flip: true, on: 't', z: 1 });
+  assert.equal(placePiece(pieces, 'b', { x: 0, y: 0, flip: false, on: 't' }), pieces, 'only one on top');
+  assert.equal(placePiece(pieces, 'b', { x: 0, y: 0, flip: false, on: 'c' }), pieces, 'a cat has no room on top');
+  // The cat does not take floor cells: another piece can use the table's neighbours freely, and the table moves with it.
+  pieces = placePiece(pieces, 't', { x: 7, y: 1, flip: false });
+  assert.equal(rootOf(pieces, pieces[1]!)!.id, 't');
+  assert.equal(unplacePiece(pieces, 't')[1]!.placed, null, 'sending the table to the tray takes the cat too');
+});
+
+test('stacks never loop, survive saving and travel between devices', () => {
+  const drum = piece('d', 'circo-tambor', { x: 2, y: 3, flip: false });
+  const hat = piece('h', 'circo-sombrero', { x: 0, y: 0, flip: false, on: 'd' });
+  const pieces = [drum, hat];
+  assert.ok(!fits(pieces, 'circo-tambor', { x: 0, y: 0, flip: false, on: 'h' }, 'd'), 'the drum cannot go on its own hat');
+  const saved = applyBoard(pieces, layoutOf(pieces));
+  assert.deepEqual(saved, pieces);
+  assert.equal(applyBoard(pieces, { h: { x: 0, y: 0, flip: false, on: 'nadie' } }), pieces);
+  const back = decode(encode(toSynced({ ...deviceWith([T0]), pieces })))!.pieces;
+  assert.deepEqual(back.find((p) => p.id === 'h')!.placed, { x: 0, y: 0, flip: false, on: 'd' });
+  assert.equal(normalizePieces([hat])[0]!.placed, null, 'without its base it waits in the tray');
+});
+
+// ---- Who is in front ----
+
+import { nextZ } from '../src/core/board.js';
+
+test('the last piece placed or earned is in front at its depth, and that order travels between devices', () => {
+  let pieces: Piece[] = [piece('a', '1-09', { x: 0, y: 0, flip: false }), piece('b', '1-12', { x: 1, y: 0, flip: false })];
+  assert.equal(nextZ(pieces), 1);
+  pieces = placePiece(pieces, 'a', { x: 2, y: 0, flip: false });
+  pieces = placePiece(pieces, 'b', { x: 3, y: 0, flip: false });
+  assert.ok(pieces[1]!.placed!.z! > pieces[0]!.placed!.z!, 'b was placed after a');
+  pieces = awardPiece(pieces, T0);
+  assert.equal(pieces[2]!.placed!.z, 3, 'a new piece goes in front too');
+  const back = decode(encode(toSynced({ ...deviceWith([T0]), pieces })))!.pieces;
+  assert.deepEqual(back.map((p) => p.placed?.z), [1, 2, 3]);
 });
