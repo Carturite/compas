@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Calibrador de escenas · compaz</title>
+<!--
+  Herramienta local para preparar escenas (no es parte de la extensión).
+  Se abre con: python scripts/escenas.py --calibrar
+  Pisos: 4 esquinas sobre el fondo. Objetos: contorno de lo que tapa a los personajes.
+  Personajes: nombre y ancho (1 o 2 cuadritos) de cada recorte. "Guardar" escribe escena.json y regenera todo.
+-->
+<style>
+  :root { --bg: #16181b; --panel: #202327; --line: #33373d; --text: #e9e6df; --muted: #9a9890; --accent: #6fc2b4; --warn: #e3967c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; }
+  main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+  #stage { position: relative; overflow: auto; padding: 12px; }
+  svg { width: 100%; height: auto; display: block; user-select: none; background: #000; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 10px 12px; }
+  button, select, input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #10201e; border-color: var(--accent); font-weight: 600; }
+  button[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  input[type='number'] { width: 56px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; }
+  .row.sel { border-color: var(--accent); }
+  .muted { color: var(--muted); }
+  .help { color: var(--muted); margin: 6px 0 10px; }
+  #status { color: var(--muted); white-space: pre-wrap; max-width: 520px; }
+  .cuts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .cut { border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: grid; gap: 4px; }
+  .cut.on { border-color: var(--accent); }
+  .cut img { width: 100%; height: 80px; object-fit: contain; background: #2b4a2b; border-radius: 4px; }
+  .cut input[type='text'] { width: 100%; }
+  .handle { fill: #fff; stroke: #000; stroke-width: 2; cursor: grab; }
+  .grid { fill: rgba(255,255,255,.06); stroke: rgba(255,255,255,.75); stroke-width: 1.5; }
+  .grid.sel { stroke: var(--accent); fill: rgba(111,194,180,.12); }
+  .grid.blocked { fill: rgba(227,150,124,.45); }
+  .prop { fill: rgba(80,190,255,.15); stroke: #50beff; stroke-width: 2; }
+  .prop.sel { fill: rgba(80,190,255,.3); stroke-width: 3; }
+  .base { stroke: #50beff; stroke-dasharray: 10 8; stroke-width: 2; }
+  .label { fill: #ff0; font-size: 16px; paint-order: stroke; stroke: #000; stroke-width: 3px; }
+  .pending { fill: var(--warn); stroke: #000; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Calibrador de escenas</h1>
+  <select id="scene"></select>
+  <button id="save" class="primary">Guardar y regenerar</button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="stage"><svg id="svg"></svg></div>
+  <aside>
+    <div class="tabs" role="tablist">
+      <button data-tab="escena">Escena</button>
+      <button data-tab="pisos" aria-pressed="true">Pisos</button>
+      <button data-tab="objetos">Objetos</button>
+      <button data-tab="personajes">Personajes</button>
+    </div>
+    <div id="panel"></div>
+  </aside>
+</main>
+<script>
+const W = 1280;
+const $ = (s) => document.querySelector(s);
+const svg = $('#svg');
+let folders = [];
+let sid = '';
+let escena = null;
+let H = 720;
+let cuts = [];
+let tab = 'pisos';
+let sel = null;          // { kind: 'piso' | 'objeto', i }
+let mode = 'idle';       // idle | nuevoPiso | nuevoObjeto | bloquear
+let pending = [];        // points being clicked for a new floor or prop
+let trying = null;       // cut being tried on the floors
+let mouse = null;        // picture point under the pointer
+
+// ---- Perspective (same math as src/core/perspective.ts) ----
+function squareToQuad(q) {
+  const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = q;
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+  const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) return [x1 - x0, x3 - x0, x0, y1 - y0, y3 - y0, y0, 0, 0, 1];
+  const den = dx1 * dy2 - dx2 * dy1;
+  const g = (dx3 * dy2 - dx2 * dy3) / den, h = (dx1 * dy3 - dx3 * dy1) / den;
+  return [x1 - x0 + g * x1, x3 - x0 + h * x3, x0, y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h, 1];
+}
+const apply = (m, u, v) => { const w = m[6] * u + m[7] * v + m[8]; return [(m[0] * u + m[1] * v + m[2]) / w, (m[3] * u + m[4] * v + m[5]) / w]; };
+function invert(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const r = [e * i - f * h, c * h - b * i, b * f - c * e, f * g - d * i, a * i - c * g, c * d - a * f, d * h - e * g, b * g - a * h, a * e - b * d];
+  return r.map((v) => v / r[8]);
+}
+function view(p) {
+  const m = squareToQuad(p.esquinas);
+  return { t: (x, y) => apply(m, x / p.cols, y / p.rows), back: invert(m) };
+}
+function cellAt(px, py) {
+  const pisos = escena.pisos;
+  for (let i = pisos.length - 1; i >= 0; i--) {
+    const p = pisos[i];
+    const [u, v] = apply(view(p).back, px, py);
+    const x = Math.floor(u * p.cols), y = Math.floor(v * p.rows);
+    if (x >= 0 && y >= 0 && x < p.cols && y < p.rows) return { i, x, y };
+  }
+  return null;
+}
+
+// ---- Loading ----
+async function loadFolders() {
+  folders = (await (await fetch('/escenas')).json()).escenas;
+  $('#scene').innerHTML = folders.map((f) => `<option value="${f.id}">${f.id}${f.escena ? '' : ' (nueva)'}</option>`).join('');
+  const wanted = new URLSearchParams(location.search).get('escena');
+  await loadScene(folders.some((f) => f.id === wanted) ? wanted : folders[0]?.id);
+}
+
+async function loadScene(id) {
+  sid = id;
+  $('#scene').value = id;
+  history.replaceState(null, '', `?escena=${id}`);
+  const base = `/img/escenas/${id}/`;
+  const folder = folders.find((f) => f.id === id);
+  const r = folder.escena ? await fetch(base + 'escena.json') : null;
+  escena = r && r.ok ? await r.json() : {
+    nombre: id, orden: folders.length, desbloqueo: 25, fondo: 'fondo.png',
+    hojas: folder.hojas.map((archivo) => ({ archivo, celda: 250 })), pisos: [], objetos: {}, personajes: {},
+  };
+  escena.objetos ??= {};
+  escena.personajes ??= {};
+  const img = new Image();
+  img.src = base + escena.fondo;
+  await img.decode();
+  H = Math.round((W * img.naturalHeight) / img.naturalWidth);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const ci = await fetch(base + '_recortes/indice.json');
+  cuts = ci.ok ? await ci.json() : [];
+  sel = null; mode = 'idle'; pending = []; trying = null;
+  status(cuts.length ? '' : 'Esta escena aún no tiene recortes: guarda una vez para cortar sus hojas.');
+  render();
+}
+
+// ---- Drawing ----
+const pts = (a) => a.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+function draw() {
+  const out = [`<image href="/img/escenas/${sid}/${escena.fondo}" x="0" y="0" width="${W}" height="${H}"/>`];
+  escena.pisos.forEach((p, i) => {
+    const { t } = view(p);
+    const blocked = new Set((p.bloqueadas || []).map((c) => c.join()));
+    const isSel = sel?.kind === 'piso' && sel.i === i;
+    for (let y = 0; y < p.rows; y++) for (let x = 0; x < p.cols; x++) {
+      const cls = `grid${isSel ? ' sel' : ''}${blocked.has(`${x},${y}`) ? ' blocked' : ''}`;
+      out.push(`<polygon class="${cls}" points="${pts([t(x, y), t(x + 1, y), t(x + 1, y + 1), t(x, y + 1)])}"/>`);
+    }
+    const [lx, ly] = t(0, 0);
+    out.push(`<text class="label" x="${lx}" y="${ly - 4}">${p.id}</text>`);
+  });
+  Object.entries(escena.objetos).forEach(([name, o], i) => {
+    const isSel = sel?.kind === 'objeto' && sel.i === i;
+    out.push(`<polygon class="prop${isSel ? ' sel' : ''}" points="${pts(o.poligono)}"/>`);
+    if (isSel) out.push(`<line class="base" x1="0" x2="${W}" y1="${o.base}" y2="${o.base}"/>`);
+    out.push(`<text class="label" x="${o.poligono[0][0]}" y="${o.poligono[0][1] - 4}" style="fill:#50beff">${name}</text>`);
+  });
+  if (trying && mouse) {
+    const c = cellAt(...mouse);
+    if (c) {
+      const p = escena.pisos[c.i];
+      const w = Number(personajeOf(trying.recorte)?.ancho || 1);
+      const x = Math.min(c.x, p.cols - w);
+      const { t } = view(p);
+      const [ax, ay] = t(x, c.y + 0.85), [bx, by] = t(x + w, c.y + 0.85);
+      const cell = Math.hypot(bx - ax, by - ay) / w;
+      const sheet = trying.recorte.split('#')[0];
+      const celda = escena.hojas.find((h) => h.archivo === sheet)?.celda || 250;
+      const sw = (trying.nw / celda) * cell, sh = (trying.nh / celda) * cell;
+      out.push(`<image href="/img/escenas/${sid}/_recortes/${trying.archivo}" x="${(ax + bx) / 2 - sw / 2}" y="${(ay + by) / 2 - sh}" width="${sw}" height="${sh}" preserveAspectRatio="xMidYMax meet"/>`);
+    }
+  }
+  // Handles of what is selected, and the points being clicked.
+  if (sel?.kind === 'piso') escena.pisos[sel.i].esquinas.forEach(([x, y], k) => out.push(`<circle class="handle" data-h="${k}" cx="${x}" cy="${y}" r="7"/><text class="label" x="${x + 9}" y="${y - 9}">${k + 1}</text>`));
+  if (sel?.kind === 'objeto') {
+    const o = Object.values(escena.objetos)[sel.i];
+    o.poligono.forEach(([x, y], k) => out.push(`<circle class="handle" data-h="${k}" cx="${x}" cy="${y}" r="6"/>`));
+    const cx = o.poligono.reduce((a, p) => a + p[0], 0) / o.poligono.length;
+    out.push(`<rect class="handle" data-h="base" x="${cx - 7}" y="${o.base - 7}" width="14" height="14"/>`);
+  }
+  pending.forEach(([x, y], k) => out.push(`<circle class="handle pending" cx="${x}" cy="${y}" r="6"/><text class="label" x="${x + 8}" y="${y - 8}">${k + 1}</text>`));
+  svg.innerHTML = out.join('');
+}
+
+// ---- Panels ----
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+function personajeOf(recorte) {
+  return Object.entries(escena.personajes).map(([id, p]) => ({ id, ...p })).find((p) => p.recorte === recorte);
+}
+function panel() {
+  const P = $('#panel');
+  document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tab === tab)));
+  if (tab === 'escena') {
+    const folder = folders.find((f) => f.id === sid);
+    const sheets = folder.hojas.map((archivo) => {
+      const h = escena.hojas.find((x) => x.archivo === archivo);
+      return `<div class="row"><label><input type="checkbox" data-sheet="${esc(archivo)}" ${h ? 'checked' : ''}> ${esc(archivo)}</label>
+        <span class="muted">celda</span><input type="number" data-celda="${esc(archivo)}" value="${h?.celda ?? 250}" min="20" step="5"></div>`;
+    }).join('');
+    P.innerHTML = `<div class="row"><span>Nombre</span><input id="f-nombre" value="${esc(escena.nombre)}"></div>
+      <div class="row"><span>Orden</span><input id="f-orden" type="number" value="${escena.orden ?? 99}"></div>
+      <div class="row"><span>Se abre con</span><input id="f-desbloqueo" type="number" min="0" value="${escena.desbloqueo ?? 0}"><span class="muted">personajes ganados</span></div>
+      <p class="help">Hojas de personajes. "celda" = cuántos píxeles de la hoja mide un cuadrito: más grande = personajes más chicos. Pruébalo en la pestaña Personajes.</p>${sheets}`;
+  } else if (tab === 'pisos') {
+    P.innerHTML = `<p class="help">${mode === 'nuevoPiso' ? `Haz clic en las 4 esquinas del piso: <b>fondo-izquierda, fondo-derecha, frente-derecha, frente-izquierda</b>. (${pending.length}/4)` : 'El primer piso es el suelo principal. Selecciona uno para arrastrar sus esquinas.'}</p>
+      ${escena.pisos.map((p, i) => `<div class="row${sel?.kind === 'piso' && sel.i === i ? ' sel' : ''}">
+        <input data-pid="${i}" value="${esc(p.id)}" style="width:110px">
+        <input type="number" data-pcols="${i}" value="${p.cols}" min="1" title="columnas"> ×
+        <input type="number" data-prows="${i}" value="${p.rows}" min="1" title="filas">
+        <select data-psobre="${i}"><option value="">sin objeto</option>${Object.keys(escena.objetos).map((n) => `<option ${p.sobre === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        <button data-psel="${i}">Editar</button>
+        <button data-pblock="${i}" aria-pressed="${mode === 'bloquear' && sel?.i === i}">Bloquear</button>
+        <button data-pdel="${i}">✕</button></div>`).join('')}
+      <button id="new-floor">+ Piso nuevo</button>
+      <p class="help">"Bloquear": clic en celdas ocupadas por el decorado. "sin objeto / objeto": si el piso está encima de un objeto (banco, tarima), los personajes se dibujan sobre él.</p>`;
+  } else if (tab === 'objetos') {
+    const names = Object.keys(escena.objetos);
+    P.innerHTML = `<p class="help">${mode === 'nuevoObjeto' ? `Haz clic alrededor del objeto. Enter o "Terminar" para cerrarlo. (${pending.length} puntos)` : 'Contorno de lo que debe tapar a los personajes que están detrás. La línea punteada (base) es donde toca el suelo: arrastra el cuadrito.'}</p>
+      ${names.map((n, i) => { const o = escena.objetos[n]; return `<div class="row${sel?.kind === 'objeto' && sel.i === i ? ' sel' : ''}">
+        <input data-oname="${i}" value="${esc(n)}" style="width:110px">
+        <span class="muted">base</span><input type="number" data-obase="${i}" value="${o.base}">
+        <label title="Quita pasto y piedras por color (para arbustos)"><input type="checkbox" data-okey="${i}" ${o.llave ? 'checked' : ''}> llave</label>
+        <button data-osel="${i}">Editar</button><button data-odel="${i}">✕</button></div>`; }).join('')}
+      ${mode === 'nuevoObjeto' ? '<button id="finish-prop" class="primary">Terminar</button> <button id="cancel-new">Cancelar</button>' : '<button id="new-prop">+ Objeto nuevo</button>'}`;
+  } else {
+    P.innerHTML = cuts.length ? `<p class="help">Marca "usar", ponle nombre y ancho (1 o 2 cuadritos). "Probar" lo muestra bajo el mouse sobre los pisos para ver su tamaño.</p>
+      <div class="cuts">${cuts.map((c, k) => { const p = personajeOf(c.recorte); return `<div class="cut${p ? ' on' : ''}">
+        <img src="/img/escenas/${sid}/_recortes/${c.archivo}" alt="">
+        <span class="muted">${esc(c.recorte)}</span>
+        <label><input type="checkbox" data-cuse="${k}" ${p ? 'checked' : ''}> usar</label>
+        <input type="text" data-cid="${k}" value="${esc(p?.id ?? `${sid}-${k}`)}" placeholder="id">
+        <input type="text" data-cname="${k}" value="${esc(p?.nombre ?? '')}" placeholder="nombre">
+        <span><select data-cw="${k}"><option value="1" ${p?.ancho !== 2 ? 'selected' : ''}>1 cuadrito</option><option value="2" ${p?.ancho === 2 ? 'selected' : ''}>2 cuadritos</option></select>
+        <button data-ctry="${k}" aria-pressed="${trying === c}">Probar</button></span></div>`; }).join('')}</div>`
+      : '<p class="help">Guarda una vez para cortar las hojas de esta escena.</p>';
+  }
+}
+function render() { draw(); panel(); }
+function status(text) { $('#status').textContent = text; }
+
+// ---- Pointer on the picture ----
+function point(event) {
+  const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+  return [Math.round(p.x), Math.round(p.y)];
+}
+let drag = null;
+svg.addEventListener('pointerdown', (event) => {
+  const h = event.target.closest('[data-h]');
+  if (h) { drag = h.dataset.h; svg.setPointerCapture(event.pointerId); event.preventDefault(); }
+});
+svg.addEventListener('pointermove', (event) => {
+  mouse = point(event);
+  if (drag !== null && sel) {
+    const [x, y] = mouse;
+    if (sel.kind === 'piso') escena.pisos[sel.i].esquinas[Number(drag)] = [x, y];
+    else { const o = Object.values(escena.objetos)[sel.i]; if (drag === 'base') o.base = y; else o.poligono[Number(drag)] = [x, y]; }
+    draw();
+  } else if (trying) draw();
+});
+svg.addEventListener('pointerup', () => { if (drag !== null) { drag = null; panel(); } });
+svg.addEventListener('click', (event) => {
+  if (event.target.closest('[data-h]')) return;
+  const p = point(event);
+  if (mode === 'nuevoPiso') {
+    pending.push(p);
+    if (pending.length === 4) {
+      escena.pisos.push({ id: escena.pisos.length ? `piso-${escena.pisos.length}` : 'suelo', cols: escena.pisos.length ? 3 : 8, rows: escena.pisos.length ? 1 : 4, esquinas: pending });
+      sel = { kind: 'piso', i: escena.pisos.length - 1 }; mode = 'idle'; pending = [];
+    }
+    render();
+  } else if (mode === 'nuevoObjeto') {
+    pending.push(p); render();
+  } else if (mode === 'bloquear' && sel?.kind === 'piso') {
+    const c = cellAt(...p);
+    if (c && c.i === sel.i) {
+      const f = escena.pisos[c.i];
+      f.bloqueadas ??= [];
+      const k = f.bloqueadas.findIndex(([x, y]) => x === c.x && y === c.y);
+      if (k >= 0) f.bloqueadas.splice(k, 1); else f.bloqueadas.push([c.x, c.y]);
+      draw();
+    }
+  }
+});
+function finishProp() {
+  if (pending.length >= 3) {
+    let name = 'objeto', n = 1;
+    while (escena.objetos[name]) name = `objeto-${++n}`;
+    escena.objetos[name] = { llave: false, base: Math.max(...pending.map((p) => p[1])), poligono: pending };
+    sel = { kind: 'objeto', i: Object.keys(escena.objetos).length - 1 };
+  }
+  mode = 'idle'; pending = []; render();
+}
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && mode === 'nuevoObjeto') finishProp();
+  if (event.key === 'Escape') { mode = 'idle'; pending = []; trying = null; render(); }
+});
+
+// ---- Panel inputs ----
+function renameProp(i, next) {
+  const entries = Object.entries(escena.objetos);
+  const old = entries[i][0];
+  if (!next || next === old || escena.objetos[next]) return;
+  escena.objetos = Object.fromEntries(entries.map(([n, o]) => [n === old ? next : n, o]));
+  escena.pisos.forEach((p) => { if (p.sobre === old) p.sobre = next; });
+}
+function setPersonaje(k) {
+  const c = cuts[k];
+  const card = document.querySelector(`[data-cuse="${k}"]`).closest('.cut');
+  const use = card.querySelector('[data-cuse]').checked;
+  for (const [id, p] of Object.entries(escena.personajes)) if (p.recorte === c.recorte) delete escena.personajes[id];
+  if (use) {
+    const id = card.querySelector('[data-cid]').value.trim() || `${sid}-${k}`;
+    escena.personajes[id] = { recorte: c.recorte, ancho: Number(card.querySelector('[data-cw]').value), nombre: card.querySelector('[data-cname]').value.trim() || id };
+  }
+  card.classList.toggle('on', use);
+}
+$('#panel').addEventListener('change', (e) => {
+  const t = e.target, d = t.dataset;
+  if (t.id === 'f-nombre') escena.nombre = t.value;
+  else if (t.id === 'f-orden') escena.orden = Number(t.value);
+  else if (t.id === 'f-desbloqueo') escena.desbloqueo = Math.max(0, Number(t.value));
+  else if (d.sheet !== undefined || d.celda !== undefined) {
+    escena.hojas = folders.find((f) => f.id === sid).hojas
+      .filter((a) => document.querySelector(`[data-sheet="${CSS.escape(a)}"]`).checked)
+      .map((a) => ({ archivo: a, celda: Number(document.querySelector(`[data-celda="${CSS.escape(a)}"]`).value) }));
+  }
+  else if (d.pid !== undefined) escena.pisos[d.pid].id = t.value.trim();
+  else if (d.pcols !== undefined) escena.pisos[d.pcols].cols = Math.max(1, Number(t.value));
+  else if (d.prows !== undefined) escena.pisos[d.prows].rows = Math.max(1, Number(t.value));
+  else if (d.psobre !== undefined) { if (t.value) escena.pisos[d.psobre].sobre = t.value; else delete escena.pisos[d.psobre].sobre; }
+  else if (d.oname !== undefined) renameProp(Number(d.oname), t.value.trim());
+  else if (d.obase !== undefined) Object.values(escena.objetos)[d.obase].base = Number(t.value);
+  else if (d.okey !== undefined) Object.values(escena.objetos)[d.okey].llave = t.checked;
+  else for (const k of ['cuse', 'cid', 'cname', 'cw']) if (d[k] !== undefined) { setPersonaje(Number(d[k])); break; }
+  draw();
+});
+$('#panel').addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  const d = t.dataset;
+  if (t.id === 'new-floor') { mode = 'nuevoPiso'; pending = []; sel = null; }
+  else if (t.id === 'new-prop') { mode = 'nuevoObjeto'; pending = []; sel = null; }
+  else if (t.id === 'finish-prop') return finishProp();
+  else if (t.id === 'cancel-new') { mode = 'idle'; pending = []; }
+  else if (d.psel !== undefined) { sel = { kind: 'piso', i: Number(d.psel) }; mode = 'idle'; }
+  else if (d.pblock !== undefined) { const i = Number(d.pblock); const on = !(mode === 'bloquear' && sel?.i === i); sel = { kind: 'piso', i }; mode = on ? 'bloquear' : 'idle'; }
+  else if (d.pdel !== undefined) { escena.pisos.splice(Number(d.pdel), 1); sel = null; }
+  else if (d.osel !== undefined) { sel = { kind: 'objeto', i: Number(d.osel) }; mode = 'idle'; }
+  else if (d.odel !== undefined) {
+    const name = Object.keys(escena.objetos)[Number(d.odel)];
+    delete escena.objetos[name];
+    escena.pisos.forEach((p) => { if (p.sobre === name) delete p.sobre; });
+    sel = null;
+  }
+  else if (d.ctry !== undefined) {
+    const c = cuts[Number(d.ctry)];
+    trying = trying === c ? null : c;
+  }
+  else return;
+  render();
+});
+document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; panel(); }));
+$('#scene').addEventListener('change', (e) => loadScene(e.target.value));
+
+$('#save').addEventListener('click', async () => {
+  if (!escena.pisos.length) status('Ojo: sin pisos la escena no entra en la extensión todavía.');
+  $('#save').disabled = true;
+  status('Guardando y regenerando… (puede tardar un poco)');
+  const r = await fetch(`/guardar/${sid}`, { method: 'POST', body: JSON.stringify(escena) });
+  const res = await r.json();
+  $('#save').disabled = false;
+  if (res.ok) { const keep = tab; await loadFolders(); await loadScene(sid); tab = keep; panel(); }
+  status(res.ok ? `Listo. Recarga la extensión para verlo.\n${res.log}` : `No se pudo guardar: ${res.log}`);
+});
+
+loadFolders();
+</script>
+</body>
+</html>

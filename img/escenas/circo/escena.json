@@ -1,0 +1,37 @@
+{
+  "nombre": "Circo",
+  "orden": 2,
+  "desbloqueo": 15,
+  "fondo": "fondo.png",
+  "hojas": [
+    {"archivo": "pajaritos1.png", "celda": 260}
+  ],
+  "pisos": [
+    {"id": "pista", "cols": 8, "rows": 3, "esquinas": [[300, 520], [980, 520], [1100, 668], [180, 668]]},
+    {"id": "grada", "cols": 10, "rows": 1, "esquinas": [[252, 432], [1030, 432], [1034, 447], [248, 447]]},
+    {"id": "plataforma-izq", "cols": 3, "rows": 1, "esquinas": [[0, 427], [244, 427], [228, 458], [0, 458]]},
+    {"id": "plataforma-der", "cols": 3, "rows": 1, "esquinas": [[1036, 427], [1280, 427], [1280, 458], [1052, 458]]},
+    {"id": "trapecio-izq", "cols": 2, "rows": 1, "esquinas": [[238, 216], [390, 216], [390, 226], [238, 226]]},
+    {"id": "trapecio-centro", "cols": 2, "rows": 1, "esquinas": [[550, 302], [734, 302], [734, 312], [550, 312]]},
+    {"id": "trapecio-der", "cols": 2, "rows": 1, "esquinas": [[892, 216], [1044, 216], [1044, 226], [892, 226]]}
+  ],
+  "objetos": {},
+  "personajes": {
+    "circo-guacamayo-bufon": {"recorte": "pajaritos1.png#0", "ancho": 2, "nombre": "Guacamayo bufón"},
+    "circo-guacamayo-boina": {"recorte": "pajaritos1.png#1", "ancho": 1, "nombre": "Guacamayo con boina"},
+    "circo-tucan": {"recorte": "pajaritos1.png#2", "ancho": 1, "nombre": "Tucán mago"},
+    "circo-ninfa": {"recorte": "pajaritos1.png#3", "ancho": 1, "nombre": "Ninfa de gala"},
+    "circo-perico": {"recorte": "pajaritos1.png#4", "ancho": 1, "nombre": "Perico de cabeza"},
+    "circo-martin": {"recorte": "pajaritos1.png#5", "ancho": 2, "nombre": "Martín pescador"},
+    "circo-golondrina": {"recorte": "pajaritos1.png#6", "ancho": 2, "nombre": "Golondrina"},
+    "circo-cacatua": {"recorte": "pajaritos1.png#7", "ancho": 2, "nombre": "Cacatúa reverente"},
+    "circo-petirrojo": {"recorte": "pajaritos1.png#8", "ancho": 1, "nombre": "Petirrojo trovador"},
+    "circo-guacamayo-casco": {"recorte": "pajaritos1.png#9", "ancho": 2, "nombre": "Guacamayo con casco"},
+    "circo-canon": {"recorte": "pajaritos1.png#10", "ancho": 2, "nombre": "Cañón"},
+    "circo-mesa": {"recorte": "pajaritos1.png#11", "ancho": 1, "nombre": "Mesa de magia"},
+    "circo-tambor": {"recorte": "pajaritos1.png#12", "ancho": 2, "nombre": "Tambor de pista"},
+    "circo-pelota": {"recorte": "pajaritos1.png#13", "ancho": 1, "nombre": "Pelota de circo"},
+    "circo-sombrero": {"recorte": "pajaritos1.png#14", "ancho": 1, "nombre": "Sombrero de copa"},
+    "circo-varita": {"recorte": "pajaritos1.png#15", "ancho": 1, "nombre": "Varita mágica"}
+  }
+}
